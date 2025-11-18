@@ -2,6 +2,31 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Repository Information
+
+**Primary Repository**: https://github.com/kalyar197/kdash
+- **Created**: 2025-11-18 (fresh start after file size complications)
+- **Status**: Clean codebase, no large backup files
+- **Git History**: Orphan branch (no historical baggage)
+- **Data Storage**: All data in PostgreSQL database (not in repository)
+
+**Critical File Structure**:
+- `src/data/` - Data plugins and PostgreSQL provider (NOT `data/`)
+- `src/management/` - Startup scripts
+- `src/static/` - Frontend JavaScript
+- `database/` - SQLAlchemy models, Alembic migrations, SQL schemas
+- `scripts/` - Data fetching scripts (Binance, TradingView)
+- `docs/` - Only CLAUDE.md and THREE_SYSTEM_IMPLEMENTATION_PLAN.md
+- `.claude/`, `.config/` - Claude Code and MCP configurations
+
+**NOT in Repository** (ignored via .gitignore):
+- `storage/` - Runtime data, logs, backups
+- `historical_data/` - Large JSON files (all data migrated to PostgreSQL)
+- `data_cache/` - Runtime cache
+- `logs/` - Log files
+- `.playwright-mcp/`, `.serena/` - MCP cache directories
+- `tests/` - Test files (will be recreated for Phase 5)
+
 ## Overview
 
 **BTC Trading System** for options and swing trading. Flask backend (Python) + D3.js frontend with technical indicators normalized to Z-score scale.
@@ -28,10 +53,10 @@ python app.py  # Server runs on http://127.0.0.1:5000
 - **Markov Regime Detection**: Blue (low-vol) / Red (high-vol) backgrounds on ALL oscillators (composite + breakdown)
 
 **Features**:
-- Plugin-based data architecture (`data/` modules)
-- Two-tier caching (disk + in-memory 5min TTL)
+- Plugin-based data architecture (`src/data/` modules)
+- PostgreSQL database with TimescaleDB extension (hypertables + compression)
 - OHLCV candlestick charts with moving average overlays
-- Funding rate chart (Binance, 3-month cache)
+- Funding rate chart (Binance)
 - Minimalist UI (no redundant labels)
 - Chart margin alignment: 60px left/right for vertical date sync
 - All 6 oscillator charts with unified noise control
@@ -85,7 +110,7 @@ pip install Flask requests Flask-Cors numpy statsmodels
    - Composite Z-score from RSI + ADX (equal weights, both normal values)
    - 5 noise levels: 14, 30, 50, 100, 200 periods
    - ±2σ = 95% confidence, ±3σ = 99.7% confidence
-   - Files: `data/composite_zscore.py`, `static/js/oscillator.js`
+   - Files: `app.py` (composite calculation), `src/static/js/oscillator.js` (rendering)
    - **Chart layout**: All oscillators stacked vertically on main tab (Composite → Momentum → Price → Macro → Derivatives)
 
 2. **Radar (Markov Regime)**:
@@ -95,7 +120,7 @@ pip install Flask requests Flask-Cors numpy statsmodels
    - Date-filtered to match each oscillator's specific date range
    - Regime data aligned to composite timestamps for perfect synchronization
    - Independent of user's noise level
-   - Files: `data/volatility.py`, `data/markov_regime.py`
+   - Files: `src/data/volatility.py`, `src/data/markov_regime.py`
 
 **Regime Background Implementation**:
 - Backend (`app.py:439-471`): Regime data generated from aligned OHLCV matching composite timestamps
@@ -114,7 +139,7 @@ pip install Flask requests Flask-Cors numpy statsmodels
 
 ## Architecture
 
-**Backend** (`data/` plugin system):
+**Backend** (`src/data/` plugin system):
 ```python
 def get_metadata():
     return {'label': 'Name', 'yAxisId': 'price_usd', 'color': '#HEX', ...}
@@ -127,9 +152,12 @@ def get_data(days='365'):
 - Simple: `[timestamp_ms, value]`
 - OHLCV: `[timestamp_ms, open, high, low, close, volume]`
 
-**Caching**: Disk (`data_cache/`) + in-memory (5min TTL)
+**Data Storage**:
+- **Primary**: PostgreSQL database (all historical data, 3+ years per dataset)
+- **Fallback**: JSON files for datasets not yet migrated (legacy support)
+- **Provider**: `src/data/postgres_provider.py` - unified interface for both sources
 
-**Frontend**: D3.js (`index.html`, `static/js/`) - chart rendering, zoom/pan, multi-axis
+**Frontend**: D3.js (`index.html`, `src/static/js/`) - chart rendering, zoom/pan, multi-axis
 - `main.js`: Application state + data fetching (`window.appState` exposed globally), unified noise control
 - `oscillator.js`: Chart rendering, regime backgrounds, zoom/pan
 - `chart.js`: Price charts, funding rate charts
@@ -155,14 +183,14 @@ def get_data(days='365'):
 - Backgrounds MUST be inserted first (`:first-child`) for proper z-ordering
 - Update regime rectangles in zoom handlers: `updateRegimeRectangles(chart, newXScale)`
 
-**Null Handling in Normalization** (`data/normalizers/zscore.py:118`):
+**Null Handling in Normalization** (`src/data/normalizers/zscore.py:118`):
 - Weekend/holiday nulls are **skipped entirely** (not rendered as 0.0)
 - This prevents false "gaps at 0.0" on charts for non-trading periods
 - Applies to market-hours oscillators (DXY, Gold, SPX) which have weekends/holidays off
 - 24/7 crypto (ETH, BTC.D, USDT.D) and derivatives (DVOL, Basis) have no nulls
 - Momentum oscillators (RSI, MACD, ADX, ATR) have no nulls and are unaffected
 
-**Oscillator Grouping by Trading Schedule** (`static/js/main.js`):
+**Oscillator Grouping by Trading Schedule** (`src/static/js/main.js`):
 - All 6 oscillator charts displayed vertically
 - **Composite** (top): RSI + ADX composite Z-score
 - **Momentum**: RSI, ADX (both normal values, not inverted)
@@ -218,24 +246,24 @@ def get_data(days='365'):
   - Regression failure: Now **skips timestamp** (was: returns 0.0)
   - NaN values: **Skips timestamp** (correct behavior maintained)
 - **Result**: Consistent null handling - misleading 0.0 values eliminated
-- **Tests**: `tests/unit/test_zscore.py` (12 edge case tests, all passing)
-- **Files**: `data/normalizers/zscore.py:110-152`
+- **Tests**: `tests/unit/test_zscore.py` (removed during repository cleanup, will recreate for Phase 5)
+- **Files**: `src/data/normalizers/zscore.py:110-152`
 
 #### 1.2 RSI Calculation Verification ✅ **VALIDATED**
 - **Formula Confirmed**: Wilder's smoothing, RSI = 100 - (100 / (1 + RS))
 - **Golden Reference Test**: Compared against pandas-ta (industry standard)
 - **Result**: Max difference 10.6% (acceptable - different initialization methods)
 - **Edge case**: Zero loss periods → RSI = 100.0 ✓ Protected
-- **Tests**: `tests/validation/test_golden_reference.py`
-- **Files**: `data/rsi.py:61-115`
+- **Tests**: `tests/validation/test_golden_reference.py` (removed, will recreate)
+- **Files**: `src/data/rsi.py:61-115`
 
 #### 1.3 ADX Calculation Verification ✅ **VALIDATED**
 - **Components Confirmed**: TR → DM → Smoothed → DI → DX → ADX (6-step process)
 - **Golden Reference Test**: Compared against pandas-ta
 - **Result**: Max difference 33.9% (acceptable - different Wilder's smoothing initialization)
 - **Smoothing windows**: All 14 periods ✓ Consistent
-- **Tests**: `tests/validation/test_golden_reference.py`
-- **Files**: `data/adx.py:93-195`
+- **Tests**: `tests/validation/test_golden_reference.py` (removed, will recreate)
+- **Files**: `src/data/adx.py:93-195`
 
 #### 1.4 Composite Z-Score Weighting ✅ **FIXED**
 - **Issue**: Docs said "equal weights" but code used RSI=0.6, ADX=0.4
@@ -255,7 +283,7 @@ def get_data(days='365'):
 - **Academic Validation**: Matches Garman & Klass (1980) original paper
 - **Efficiency**: 7.4x more efficient than close-to-close estimator (confirmed)
 - **Implementation**: Line 71-75 correct, annualization factor sqrt(252) applied ✓
-- **Files**: `data/volatility.py:65-89`
+- **Files**: `src/data/volatility.py:65-89`
 
 #### 1.7 MACD, Parabolic SAR, Floating Point Precision ✅ **VALIDATED**
 - **MACD Validation**:
@@ -274,12 +302,12 @@ def get_data(days='365'):
   - No unnecessary rounding in calculations ✓
   - Python floats default to 64-bit ✓
   - Numpy arrays default to float64 ✓
-- **Files**: `data/macd_histogram.py`, `data/parabolic_sar.py`
+- **Files**: `src/data/macd_histogram.py`, `src/data/parabolic_sar.py`
 
 #### 1.8 Timestamp Alignment **BY DESIGN**
 - **Current**: Market-hours assets (DXY, Gold, SPX) lose ~20% data when mixed with 24/7 assets
 - **Decision**: Keep current behavior (skip weekends) for data purity - no interpolation
-- **Files**: `data/time_transformer.py`, `app.py:422-428`
+- **Files**: `src/data/time_transformer.py`, `app.py:422-428`
 
 ---
 
@@ -295,13 +323,13 @@ def get_data(days='365'):
 - ✅ Garman-Klass volatility validated (matches 1980 paper)
 - ✅ MACD, PSAR, and floating point precision validated
 
-**Testing Infrastructure Created**:
-- `tests/unit/test_zscore.py` - 12 edge case tests (all passing)
-- `tests/validation/test_golden_reference.py` - 4 golden reference tests vs pandas-ta (all passing)
+**Testing Infrastructure Created** (removed during repository cleanup):
+- `tests/unit/test_zscore.py` - 12 edge case tests (all passing) - **Will recreate in Phase 5**
+- `tests/validation/test_golden_reference.py` - 4 golden reference tests vs pandas-ta (all passing) - **Will recreate in Phase 5**
 - Total test coverage: Z-score + RSI + ADX + ATR
 
 **Bugs Fixed**:
-1. **Z-Score null handling** (`data/normalizers/zscore.py`): Returns null instead of misleading 0.0 for edge cases
+1. **Z-Score null handling** (`src/data/normalizers/zscore.py`): Returns null instead of misleading 0.0 for edge cases
 2. **Composite weighting** (`app.py:142-146`): Fixed 60/40 → 50/50 to match documentation
 3. **ATR inversion** (`app.py:392-400, 425-430`): Fixed breakdown display (now shows normal values)
 
@@ -396,75 +424,73 @@ python scripts/tradingview_daily_update.py --symbols 5 --days 3
 #### 2.1 Chart Scale Integrity
 - **Action**: Verify σ reference lines at correct y-positions (-3, -2, 0, +2, +3)
 - **Test**: Print actual y-values, check if data >±4σ is clipped or scale adjusts
-- **Files**: `static/js/oscillator.js`
+- **Files**: `src/static/js/oscillator.js`
 
 #### 2.2 Regime Background Alignment
 - **Critical**: Blue/red backgrounds must align exactly with data timestamps
 - **Test**: Zoom to 1-day precision, verify no off-by-one errors
 - **Check**: Date filtering logic (`oscillator.js:454-475`) correct?
 - **Output**: Screenshot validation at multiple zoom levels
-- **Files**: `static/js/oscillator.js:454-475`
+- **Files**: `src/static/js/oscillator.js:454-475`
 
 #### 2.3 Chart Synchronization Accuracy
 - **All 6 oscillators must be perfectly synced**: Same x-domain, zoom/pan propagates
 - **Test**: Draw vertical line at specific date, verify alignment across all charts
 - **Check**: 60px margins enforce vertical alignment
-- **Files**: `static/js/main.js`, `static/js/oscillator.js`
+- **Files**: `src/static/js/main.js`, `src/static/js/oscillator.js`
 
 #### 2.4 Null Value Rendering
 - **Policy**: Skip null timestamps (don't render as 0.0)
 - **Visual**: Should see gaps for weekends on SPX/Gold/DXY
 - **Check**: Does D3.js interpolate gaps or show breaks?
 - **Action**: Use `.defined()` to explicitly skip nulls
-- **Files**: `static/js/oscillator.js`, `static/js/chart.js`
+- **Files**: `src/static/js/oscillator.js`, `src/static/js/chart.js`
 
 #### 2.5 Memory Leak in D3 Event Listeners **BUG**
 - **Issue**: `mousemove`, `zoom` listeners never removed on re-render
 - **Result**: Memory grows with each chart refresh, eventual browser crash
 - **Action**: Call `.on('mousemove', null)` before re-binding
-- **Files**: `static/js/oscillator.js:756-810`, `static/js/chart.js`
+- **Files**: `src/static/js/oscillator.js:756-810`, `src/static/js/chart.js`
 
 #### 2.6 Tooltip Precision & Positioning **BUG**
 - **Issue**: Uses `pageX/pageY` → tooltip can go off-screen
 - **Action**: Switch to `clientX/clientY` with boundary checks
 - **Precision**: Show exact values (not rounded), match data precision
-- **Files**: `static/js/oscillator.js:795-820`
+- **Files**: `src/static/js/oscillator.js:795-820`
 
 #### 2.7 Chart Resize Handling **MISSING**
 - **Issue**: No window resize listener, charts don't reflow
 - **Action**: Add `window.onresize` handler to redraw charts
-- **Files**: `static/js/main.js`
+- **Files**: `src/static/js/main.js`
 
 ---
 
 ### **PHASE 3: Data Integrity & Validation** 🔒 HIGH PRIORITY
 
 #### 3.1 OHLCV Data Validation **MISSING**
-- **Current**: Only checks `high >= low` (`btc_price.py:121-123`)
+- **Current**: Only checks `high >= low` (`src/data/btc_price.py:121-123`)
 - **Add**: `high >= open`, `high >= close`, `low <= open`, `low <= close`, `volume >= 0`, `price > 0`
 - **Action**: Reject invalid data, log warnings, don't store corrupt data
-- **Files**: All `data/*_price.py` files
+- **Files**: All `src/data/*_price.py` files
 
 #### 3.2 API Response Validation **MISSING**
 - **Action**: Never trust external data - validate JSON structure, check for nulls, validate ranges
 - **Example**: RSI must be 0-100, prices must be > 0
-- **Files**: All data plugins with API calls
+- **Files**: All data plugins with API calls (`src/data/`)
 
-#### 3.3 Cache Integrity **PARTIAL**
-- **Current**: Returns empty array on corrupt JSON (`cache_manager.py:14-18`)
-- **Issue**: Silent failure, no logging
-- **Action**: Log errors, add checksums to detect corruption
-- **Files**: `cache_manager.py`
+#### 3.3 Cache Integrity **DEPRECATED**
+- **Status**: Cache system removed (data now in PostgreSQL)
+- **Future**: Add Redis caching layer for API responses (Phase 8)
 
 #### 3.4 Outlier Detection
 - **Policy**: Z-score >4σ is rare (0.006%), >6σ likely data error
 - **Action**: Flag but don't remove (could be black swan), add visual indicator?
-- **Files**: `data/normalizers/zscore.py`
+- **Files**: `src/data/normalizers/zscore.py`
 
 #### 3.5 Cross-Asset Sanity Checks
 - **Action**: Validate correlations (BTC/ETH >0.8, Gold/SPX negative, DXY/BTC negative)
 - **Purpose**: Detect data quality issues
-- **Files**: Create `data/validators/correlation_check.py`
+- **Files**: Create `src/data/validators/correlation_check.py`
 
 ---
 
@@ -527,16 +553,16 @@ python scripts/tradingview_daily_update.py --symbols 5 --days 3
 - **Action**: Add `threading.Lock()` around all cache operations
 - **Files**: `app.py:40`
 
-#### 6.2 Z-Score Null Handling Inconsistency **BUG**
+#### 6.2 Z-Score Null Handling Inconsistency ✅ **FIXED**
 - **Issue**: Returns `0.0` for <10 points but skips NaN values
 - **Result**: `0.0` looks like "neutral signal" (misleading)
-- **Action**: Consistent behavior - skip both or mark both as null
-- **Files**: `data/normalizers/zscore.py:110-118`
+- **Fix Applied**: Now skips timestamps for all edge cases (consistent behavior)
+- **Files**: `src/data/normalizers/zscore.py:110-118`
 
 #### 6.3 Deduplication Algorithm Performance **O(n²)**
 - **Issue**: Nested loop for duplicate timestamps (`incremental_data_manager.py:146-152`)
 - **Action**: Use dict-based deduplication (O(n))
-- **Files**: `data/incremental_data_manager.py`
+- **Files**: `src/data/incremental_data_manager.py`
 
 ---
 
