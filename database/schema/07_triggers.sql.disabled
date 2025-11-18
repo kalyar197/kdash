@@ -1,0 +1,474 @@
+-- Database Triggers for Automation
+-- Quality scoring, audit logging, lineage refresh, anomaly detection
+
+-- ============================================================================
+-- QUALITY SCORE CALCULATION TRIGGER
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION calculate_quality_score()
+RETURNS TRIGGER AS $$
+DECLARE
+    score INT := 100;
+    prev_value NUMERIC;
+    prev_timestamp TIMESTAMPTZ;
+    expected_interval INTERVAL;
+    source_data_type data_type_enum;
+BEGIN
+    -- Get source configuration
+    SELECT update_frequency, data_type INTO expected_interval, source_data_type
+    FROM sources
+    WHERE source_id = NEW.source_id;
+
+    -- ========================================
+    -- COMPLETENESS CHECK (-30 points)
+    -- ========================================
+    IF source_data_type = 'ohlcv' THEN
+        -- OHLCV data must have all OHLC fields
+        IF NEW.open IS NULL OR NEW.high IS NULL OR NEW.low IS NULL OR NEW.close IS NULL THEN
+            score := score - 30;
+        END IF;
+    ELSIF source_data_type IN ('simple', 'calculated', 'derivative', 'macro') THEN
+        -- Simple data must have value field
+        IF NEW.value IS NULL THEN
+            score := score - 30;
+        END IF;
+    END IF;
+
+    -- ========================================
+    -- TIMELINESS CHECK (-20 points)
+    -- ========================================
+    -- Data should arrive within 2x the expected update frequency
+    IF NEW.created_at > NEW.timestamp + (expected_interval * 2) THEN
+        score := score - 20;
+    END IF;
+
+    -- Ingestion lag check (time from data timestamp to insert)
+    IF NEW.ingestion_timestamp > NEW.timestamp + (expected_interval * 3) THEN
+        score := score - 10;
+    END IF;
+
+    -- ========================================
+    -- CONSISTENCY CHECK (-25 points)
+    -- ========================================
+    -- Check against previous value (not >50% different)
+    SELECT
+        COALESCE(close, value),
+        timestamp
+    INTO prev_value, prev_timestamp
+    FROM timeseries_data
+    WHERE source_id = NEW.source_id
+      AND timestamp < NEW.timestamp
+    ORDER BY timestamp DESC
+    LIMIT 1;
+
+    IF prev_value IS NOT NULL THEN
+        DECLARE
+            current_val NUMERIC := COALESCE(NEW.close, NEW.value);
+            pct_change NUMERIC;
+        BEGIN
+            IF current_val IS NOT NULL AND prev_value != 0 THEN
+                pct_change := ABS((current_val - prev_value) / prev_value);
+
+                -- More than 50% change is suspicious
+                IF pct_change > 0.5 THEN
+                    score := score - 25;
+                -- More than 20% change is concerning
+                ELSIF pct_change > 0.2 THEN
+                    score := score - 10;
+                END IF;
+            END IF;
+        END;
+    END IF;
+
+    -- ========================================
+    -- SEQUENCE CHECK (-15 points)
+    -- ========================================
+    -- Check if timestamp gap is much larger than expected
+    IF prev_timestamp IS NOT NULL THEN
+        DECLARE
+            actual_gap INTERVAL := NEW.timestamp - prev_timestamp;
+        BEGIN
+            IF actual_gap > expected_interval * 5 THEN
+                score := score - 15;
+            ELSIF actual_gap > expected_interval * 2 THEN
+                score := score - 5;
+            END IF;
+        END;
+    END IF;
+
+    -- ========================================
+    -- VALIDATION RULES CHECK (-10 points per violation)
+    -- ========================================
+    DECLARE
+        rule RECORD;
+        rule_result BOOLEAN;
+    BEGIN
+        FOR rule IN
+            SELECT rule_sql, severity
+            FROM validation_rules
+            WHERE data_type = source_data_type
+              AND enabled = TRUE
+        LOOP
+            BEGIN
+                -- Dynamically evaluate rule SQL
+                EXECUTE 'SELECT ' || rule.rule_sql USING NEW INTO rule_result;
+
+                IF NOT rule_result THEN
+                    IF rule.severity = 'ERROR' THEN
+                        score := score - 10;
+                    ELSIF rule.severity = 'WARNING' THEN
+                        score := score - 5;
+                    END IF;
+                END IF;
+            EXCEPTION WHEN OTHERS THEN
+                -- Rule evaluation failed, minor penalty
+                score := score - 2;
+            END;
+        END LOOP;
+    END;
+
+    -- Final score clamping
+    NEW.quality_score := GREATEST(0, LEAST(100, score));
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Attach trigger to timeseries_data
+CREATE TRIGGER trg_calculate_quality_score
+    BEFORE INSERT OR UPDATE ON timeseries_data
+    FOR EACH ROW
+    EXECUTE FUNCTION calculate_quality_score();
+
+COMMENT ON FUNCTION calculate_quality_score IS 'Auto-calculate quality score based on completeness, timeliness, consistency';
+
+
+-- ============================================================================
+-- AUDIT LOG TRIGGER (Track all modifications)
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION log_data_changes()
+RETURNS TRIGGER AS $$
+DECLARE
+    changed_cols TEXT[];
+BEGIN
+    -- Determine which columns changed
+    IF TG_OP = 'UPDATE' THEN
+        changed_cols := ARRAY(
+            SELECT column_name::TEXT
+            FROM (
+                SELECT 'open' AS column_name WHERE OLD.open IS DISTINCT FROM NEW.open
+                UNION SELECT 'high' WHERE OLD.high IS DISTINCT FROM NEW.high
+                UNION SELECT 'low' WHERE OLD.low IS DISTINCT FROM NEW.low
+                UNION SELECT 'close' WHERE OLD.close IS DISTINCT FROM NEW.close
+                UNION SELECT 'volume' WHERE OLD.volume IS DISTINCT FROM NEW.volume
+                UNION SELECT 'value' WHERE OLD.value IS DISTINCT FROM NEW.value
+                UNION SELECT 'quality_score' WHERE OLD.quality_score IS DISTINCT FROM NEW.quality_score
+            ) AS changes
+        );
+    END IF;
+
+    -- Insert audit record
+    INSERT INTO audit_log (
+        source_id,
+        timestamp,
+        action,
+        table_name,
+        old_value,
+        new_value,
+        changed_fields,
+        changed_by
+    ) VALUES (
+        COALESCE(NEW.source_id, OLD.source_id),
+        COALESCE(NEW.timestamp, OLD.timestamp),
+        TG_OP::audit_action_enum,
+        TG_TABLE_NAME,
+        CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN to_jsonb(OLD) ELSE NULL END,
+        CASE WHEN TG_OP IN ('INSERT', 'UPDATE') THEN to_jsonb(NEW) ELSE NULL END,
+        changed_cols,
+        current_user
+    );
+
+    RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql;
+
+-- Attach audit trigger (runs AFTER to avoid interfering with other triggers)
+CREATE TRIGGER trg_audit_timeseries_data
+    AFTER INSERT OR UPDATE OR DELETE ON timeseries_data
+    FOR EACH ROW
+    EXECUTE FUNCTION log_data_changes();
+
+COMMENT ON FUNCTION log_data_changes IS 'Immutable audit trail of all data modifications';
+
+
+-- ============================================================================
+-- ARCHIVE TRIGGER (Soft Delete Support)
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION archive_before_delete()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Copy deleted row to archive table
+    INSERT INTO timeseries_archive (
+        source_id,
+        timestamp,
+        date_only,
+        open, high, low, close, volume,
+        value,
+        quality_score,
+        is_anomaly,
+        deleted_by,
+        deletion_reason
+    ) VALUES (
+        OLD.source_id,
+        OLD.timestamp,
+        OLD.date_only,
+        OLD.open, OLD.high, OLD.low, OLD.close, OLD.volume,
+        OLD.value,
+        OLD.quality_score,
+        OLD.is_anomaly,
+        current_user,
+        'Automatic archive on DELETE'
+    );
+
+    RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Attach archive trigger
+CREATE TRIGGER trg_archive_before_delete
+    BEFORE DELETE ON timeseries_data
+    FOR EACH ROW
+    EXECUTE FUNCTION archive_before_delete();
+
+COMMENT ON FUNCTION archive_before_delete IS 'Preserve deleted data in immutable archive';
+
+
+-- ============================================================================
+-- LINEAGE REFRESH TRIGGER (Mark derived datasets for refresh)
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION mark_lineage_for_refresh()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Mark all derived datasets as needing refresh
+    UPDATE lineage
+    SET refresh_required = TRUE
+    WHERE parent_source_id = NEW.source_id;
+
+    -- Also mark second-order dependencies (recursive)
+    UPDATE lineage
+    SET refresh_required = TRUE
+    WHERE parent_source_id IN (
+        SELECT derived_source_id
+        FROM lineage
+        WHERE parent_source_id = NEW.source_id
+    );
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Attach lineage trigger
+CREATE TRIGGER trg_mark_lineage_refresh
+    AFTER INSERT OR UPDATE ON timeseries_data
+    FOR EACH ROW
+    EXECUTE FUNCTION mark_lineage_for_refresh();
+
+COMMENT ON FUNCTION mark_lineage_for_refresh IS 'Auto-mark derived datasets when parent data updated';
+
+
+-- ============================================================================
+-- SOURCE UPDATE TIMESTAMP TRIGGER
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION update_source_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Update source's last_successful_update when new data inserted
+    UPDATE sources
+    SET
+        last_successful_update = NOW(),
+        next_scheduled_update = NOW() + update_frequency,
+        updated_at = NOW()
+    WHERE source_id = NEW.source_id;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Attach source update trigger
+CREATE TRIGGER trg_update_source_timestamp
+    AFTER INSERT ON timeseries_data
+    FOR EACH ROW
+    EXECUTE FUNCTION update_source_timestamp();
+
+COMMENT ON FUNCTION update_source_timestamp IS 'Update source metadata when new data arrives';
+
+
+-- ============================================================================
+-- ANOMALY DETECTION TRIGGER
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION detect_anomalies()
+RETURNS TRIGGER AS $$
+DECLARE
+    z_score_val NUMERIC;
+    mean_val NUMERIC;
+    stddev_val NUMERIC;
+    source_data_type data_type_enum;
+    current_val NUMERIC;
+BEGIN
+    -- Get current value (OHLCV uses close, simple uses value)
+    current_val := COALESCE(NEW.close, NEW.value);
+
+    IF current_val IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    -- Get data type
+    SELECT data_type INTO source_data_type
+    FROM sources
+    WHERE source_id = NEW.source_id;
+
+    -- Calculate z-score using rolling 200-period window
+    SELECT
+        AVG(COALESCE(close, value)),
+        STDDEV(COALESCE(close, value))
+    INTO mean_val, stddev_val
+    FROM (
+        SELECT close, value
+        FROM timeseries_data
+        WHERE source_id = NEW.source_id
+          AND timestamp <= NEW.timestamp
+        ORDER BY timestamp DESC
+        LIMIT 200
+    ) recent_data;
+
+    -- Calculate z-score
+    IF stddev_val IS NOT NULL AND stddev_val > 0 THEN
+        z_score_val := (current_val - mean_val) / stddev_val;
+
+        -- Flag as anomaly if |z_score| > 4
+        IF ABS(z_score_val) > 4 THEN
+            NEW.is_anomaly := TRUE;
+
+            -- Insert anomaly record
+            INSERT INTO anomalies (
+                source_id,
+                timestamp,
+                anomaly_type,
+                severity,
+                value,
+                z_score,
+                expected_value,
+                deviation_pct,
+                is_blackswan
+            ) VALUES (
+                NEW.source_id,
+                NEW.timestamp,
+                CASE
+                    WHEN ABS(z_score_val) > 6 THEN 'outlier_6sigma'::anomaly_type_enum
+                    ELSE 'outlier_4sigma'::anomaly_type_enum
+                END,
+                CASE
+                    WHEN ABS(z_score_val) > 6 THEN 'CRITICAL'
+                    WHEN ABS(z_score_val) > 5 THEN 'HIGH'
+                    ELSE 'MEDIUM'
+                END,
+                current_val,
+                z_score_val,
+                mean_val,
+                ((current_val - mean_val) / NULLIF(mean_val, 0)) * 100,
+                ABS(z_score_val) > 6
+            );
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Attach anomaly detection trigger
+CREATE TRIGGER trg_detect_anomalies
+    BEFORE INSERT OR UPDATE ON timeseries_data
+    FOR EACH ROW
+    EXECUTE FUNCTION detect_anomalies();
+
+COMMENT ON FUNCTION detect_anomalies IS 'Auto-detect statistical outliers using rolling z-score';
+
+
+-- ============================================================================
+-- DATA FRESHNESS REFRESH TRIGGER
+-- ============================================================================
+
+-- Refresh data_freshness materialized view when sources updated
+CREATE OR REPLACE FUNCTION refresh_data_freshness()
+RETURNS TRIGGER AS $$
+BEGIN
+    REFRESH MATERIALIZED VIEW CONCURRENTLY data_freshness;
+    RETURN NEW;
+EXCEPTION
+    WHEN OTHERS THEN
+        -- Log error but don't fail the insert
+        RAISE WARNING 'Failed to refresh data_freshness view: %', SQLERRM;
+        RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger on sources table changes
+CREATE TRIGGER trg_refresh_freshness_on_source_change
+    AFTER INSERT OR UPDATE ON sources
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION refresh_data_freshness();
+
+COMMENT ON FUNCTION refresh_data_freshness IS 'Keep data_freshness view up-to-date';
+
+
+-- ============================================================================
+-- TIMESTAMP NORMALIZATION TRIGGER
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION normalize_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Ensure timestamp is normalized to daily UTC boundary for daily data
+    -- (Only for sources with daily update_frequency)
+    DECLARE
+        update_freq INTERVAL;
+    BEGIN
+        SELECT update_frequency INTO update_freq
+        FROM sources
+        WHERE source_id = NEW.source_id;
+
+        IF update_freq = INTERVAL '1 day' THEN
+            NEW.timestamp := normalize_to_daily_utc(NEW.timestamp);
+        END IF;
+    END;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Attach timestamp normalization trigger
+CREATE TRIGGER trg_normalize_timestamp
+    BEFORE INSERT OR UPDATE ON timeseries_data
+    FOR EACH ROW
+    EXECUTE FUNCTION normalize_timestamp();
+
+COMMENT ON FUNCTION normalize_timestamp IS 'Auto-normalize timestamps to daily UTC for daily sources';
+
+
+-- ============================================================================
+-- SUMMARY
+-- ============================================================================
+
+COMMENT ON SCHEMA public IS 'Triggers configured for:
+- Automatic quality scoring
+- Immutable audit trail
+- Soft delete archival
+- Lineage refresh marking
+- Anomaly detection (4σ, 6σ)
+- Source metadata updates
+- Timestamp normalization';

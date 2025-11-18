@@ -1,0 +1,32 @@
+# BTC Trading Dashboard - Production Dependencies
+# Generated: 2025-11-17
+# Python Version: 3.11+
+
+# Core Web Framework
+Flask==3.0.3
+Flask-Cors==4.0.1
+Flask-APScheduler==1.13.1
+Werkzeug==3.0.3
+
+# Database & ORM
+SQLAlchemy==2.0.32
+psycopg2-binary==2.9.9
+alembic==1.13.2
+
+# Data Processing
+numpy==1.26.4
+statsmodels==0.14.2
+
+# API Clients & Data Sources
+requests==2.32.3
+yfinance==0.2.41
+tvDatafeed==3.3.0
+
+# Configuration & Environment
+python-dotenv==1.0.1
+
+# Error Monitoring
+sentry-sdk[flask]==2.12.0
+
+# Utilities
+python-dateutil==2.9.0

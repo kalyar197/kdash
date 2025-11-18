@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "mcp__sequential-thinking__sequentialthinking",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git reset:*)",
+      "Bash(git push)",
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "Bash(powershell:*)",
+      "Bash(psql:*)",
+      "mcp__memory__create_entities",
+      "mcp__memory__create_relations",
+      "Bash(timeout 10 bash:*)",
+      "Bash(timeout 30 bash:*)",
+      "Bash(timeout 15 bash:*)",
+      "Bash(cat:*)",
+      "mcp__postgres__list_schemas",
+      "mcp__postgres__execute_sql",
+      "mcp__postgres__get_object_details",
+      "mcp__serena__list_dir"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

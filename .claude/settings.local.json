@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(timeout 5 python:*)",
+      "mcp__serena__write_memory",
+      "mcp__serena__list_memories",
+      "Bash(git checkout:*)",
+      "Bash(src/management/README.md)",
+      "Bash(src/management/__init__.py)",
+      "Bash(tests/README.md)",
+      "Bash(tests/__init__.py)",
+      "Bash(tests/integration/__init__.py)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(rm:*)",
+      "Bash(git push:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

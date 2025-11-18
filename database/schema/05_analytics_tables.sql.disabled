@@ -1,0 +1,305 @@
+-- Analytics and ML Integration Tables
+-- Support for feature engineering, forecasting, lineage tracking, and backtesting
+
+-- ============================================================================
+-- DATA LINEAGE TABLE (Dependency Tracking)
+-- ============================================================================
+CREATE TABLE lineage (
+    lineage_id SERIAL PRIMARY KEY,
+    derived_source_id INT NOT NULL REFERENCES sources(source_id) ON DELETE CASCADE,
+    parent_source_id INT NOT NULL REFERENCES sources(source_id) ON DELETE CASCADE,
+
+    -- Calculation specification
+    calculation_type VARCHAR(50) NOT NULL, -- 'indicator', 'zscore', 'aggregate', 'composite'
+    calculation_sql TEXT,
+    calculation_function TEXT, -- Python function name if applicable
+
+    -- Dependency metadata
+    dependency_level INT NOT NULL DEFAULT 1, -- 1 = direct, 2 = second-order, etc.
+    refresh_required BOOLEAN DEFAULT TRUE, -- TRUE if parent updated
+
+    -- Performance tracking
+    last_calculation_time INTERVAL,
+    avg_calculation_time INTERVAL,
+
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(derived_source_id, parent_source_id),
+    CONSTRAINT chk_no_self_reference CHECK (derived_source_id != parent_source_id)
+);
+
+CREATE INDEX idx_lineage_derived ON lineage(derived_source_id);
+CREATE INDEX idx_lineage_parent ON lineage(parent_source_id);
+CREATE INDEX idx_lineage_refresh_needed ON lineage(refresh_required) WHERE refresh_required = TRUE;
+
+COMMENT ON TABLE lineage IS 'Track "btc_price → rsi → composite_zscore" dependency chains';
+COMMENT ON COLUMN lineage.dependency_level IS 'Depth in dependency graph (1 = direct parent)';
+COMMENT ON COLUMN lineage.refresh_required IS 'Set TRUE when parent updated, FALSE after refresh';
+
+
+-- ============================================================================
+-- FEATURE STORE TABLE (Pre-computed ML Features)
+-- ============================================================================
+CREATE TABLE features (
+    feature_id BIGSERIAL PRIMARY KEY,
+    source_id INT NOT NULL REFERENCES sources(source_id) ON DELETE CASCADE,
+    timestamp TIMESTAMPTZ NOT NULL,
+
+    -- Common financial features
+    volatility_7d NUMERIC,
+    volatility_30d NUMERIC,
+    volatility_90d NUMERIC,
+
+    -- Momentum features
+    rsi_value NUMERIC,
+    rsi_momentum NUMERIC, -- delta from previous period
+    macd_value NUMERIC,
+    macd_signal NUMERIC,
+
+    -- Volume features
+    volume_sma_20 NUMERIC,
+    volume_ratio NUMERIC, -- current / average
+
+    -- Derivatives features
+    funding_rate NUMERIC,
+    funding_delta NUMERIC,
+    basis_spread NUMERIC,
+
+    -- Social/sentiment features
+    social_volume NUMERIC,
+    social_sentiment NUMERIC,
+
+    -- Regime features
+    regime VARCHAR(20), -- 'blue', 'red' from Markov model
+    regime_probability NUMERIC,
+
+    -- Extensible custom features (JSON)
+    custom_features JSONB DEFAULT '{}',
+
+    -- Metadata
+    feature_set_version VARCHAR(20) DEFAULT '1.0',
+    computed_at TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(source_id, timestamp)
+);
+
+CREATE INDEX idx_features_source_time ON features(source_id, timestamp DESC);
+CREATE INDEX idx_features_regime ON features(regime) WHERE regime IS NOT NULL;
+CREATE INDEX idx_features_timestamp ON features(timestamp DESC);
+
+COMMENT ON TABLE features IS 'Pre-computed ML features for fast model training and inference';
+COMMENT ON COLUMN features.custom_features IS 'Extensible JSON storage for experiment-specific features';
+
+
+-- ============================================================================
+-- FORECASTS TABLE (Model Predictions)
+-- ============================================================================
+CREATE TABLE forecasts (
+    forecast_id BIGSERIAL PRIMARY KEY,
+    source_id INT NOT NULL REFERENCES sources(source_id) ON DELETE CASCADE,
+
+    -- Forecast metadata
+    forecast_timestamp TIMESTAMPTZ NOT NULL, -- When this prediction was made
+    target_timestamp TIMESTAMPTZ NOT NULL,   -- What timestamp is being predicted
+
+    -- Prediction
+    predicted_value NUMERIC NOT NULL,
+    confidence_lower NUMERIC, -- Lower bound of confidence interval
+    confidence_upper NUMERIC, -- Upper bound of confidence interval
+    confidence_level NUMERIC DEFAULT 0.95, -- 95% confidence interval
+
+    -- Model information
+    model_name VARCHAR(100) NOT NULL, -- 'ARIMA', 'Prophet', 'LSTM', etc.
+    model_version VARCHAR(50),
+    model_parameters JSONB,
+
+    -- Validation (populated after target_timestamp occurs)
+    actual_value NUMERIC,
+    prediction_error NUMERIC, -- actual - predicted
+    absolute_error NUMERIC,   -- abs(actual - predicted)
+    percentage_error NUMERIC, -- (actual - predicted) / actual * 100
+
+    -- Metadata
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+
+    CONSTRAINT chk_confidence_bounds CHECK (
+        confidence_lower IS NULL OR confidence_upper IS NULL OR
+        confidence_lower <= predicted_value AND predicted_value <= confidence_upper
+    ),
+    CONSTRAINT chk_target_future CHECK (target_timestamp > forecast_timestamp)
+);
+
+CREATE INDEX idx_forecasts_source_target ON forecasts(source_id, target_timestamp DESC);
+CREATE INDEX idx_forecasts_model ON forecasts(model_name, created_at DESC);
+CREATE INDEX idx_forecasts_accuracy ON forecasts(abs(percentage_error)) WHERE actual_value IS NOT NULL;
+CREATE INDEX idx_forecasts_pending ON forecasts(target_timestamp) WHERE actual_value IS NULL;
+
+COMMENT ON TABLE forecasts IS 'Store model predictions and track accuracy over time';
+COMMENT ON COLUMN forecasts.forecast_timestamp IS 'When prediction was made (model training time)';
+COMMENT ON COLUMN forecasts.target_timestamp IS 'What future time point is predicted';
+
+
+-- ============================================================================
+-- BACKTEST RESULTS TABLE (Strategy Performance)
+-- ============================================================================
+CREATE TABLE backtest_results (
+    backtest_id SERIAL PRIMARY KEY,
+    strategy_name VARCHAR(100) NOT NULL,
+    strategy_version VARCHAR(50) NOT NULL,
+    strategy_description TEXT,
+
+    -- Time range
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    total_days INT GENERATED ALWAYS AS (end_date - start_date) STORED,
+
+    -- Performance metrics
+    total_return NUMERIC NOT NULL, -- %
+    annualized_return NUMERIC,
+    sharpe_ratio NUMERIC,
+    sortino_ratio NUMERIC,
+    max_drawdown NUMERIC, -- %
+    max_drawdown_duration INT, -- days
+
+    -- Trade statistics
+    total_trades INT DEFAULT 0,
+    winning_trades INT DEFAULT 0,
+    losing_trades INT DEFAULT 0,
+    win_rate NUMERIC GENERATED ALWAYS AS (
+        CASE WHEN total_trades > 0 THEN winning_trades::NUMERIC / total_trades * 100 ELSE 0 END
+    ) STORED,
+
+    -- Risk metrics
+    value_at_risk_95 NUMERIC, -- VaR at 95% confidence
+    conditional_var_95 NUMERIC, -- CVaR (expected shortfall)
+    beta NUMERIC, -- vs BTC if not BTC strategy
+    alpha NUMERIC,
+
+    -- Configuration
+    initial_capital NUMERIC DEFAULT 100000,
+    position_size NUMERIC, -- % of capital per trade
+    config JSONB DEFAULT '{}', -- Strategy parameters
+
+    -- Execution metadata
+    executed_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    executed_by VARCHAR(100) DEFAULT 'system',
+    execution_time INTERVAL, -- How long backtest took to run
+
+    -- Environment
+    data_source VARCHAR(100), -- Which dataset used
+    fees_included BOOLEAN DEFAULT TRUE,
+    slippage_included BOOLEAN DEFAULT TRUE,
+
+    CONSTRAINT chk_date_order CHECK (end_date > start_date),
+    CONSTRAINT chk_trade_counts CHECK (
+        total_trades >= 0 AND
+        winning_trades >= 0 AND
+        losing_trades >= 0 AND
+        winning_trades + losing_trades <= total_trades
+    )
+);
+
+CREATE INDEX idx_backtest_strategy ON backtest_results(strategy_name, strategy_version, executed_at DESC);
+CREATE INDEX idx_backtest_performance ON backtest_results(sharpe_ratio DESC NULLS LAST);
+CREATE INDEX idx_backtest_date_range ON backtest_results USING gist (daterange(start_date, end_date));
+
+COMMENT ON TABLE backtest_results IS 'Store strategy backtest performance for comparison and optimization';
+COMMENT ON COLUMN backtest_results.sharpe_ratio IS 'Risk-adjusted return (return / volatility)';
+COMMENT ON COLUMN backtest_results.sortino_ratio IS 'Like Sharpe but only penalizes downside volatility';
+
+
+-- ============================================================================
+-- BACKTEST TRADES TABLE (Individual Trade Records)
+-- ============================================================================
+CREATE TABLE backtest_trades (
+    trade_id BIGSERIAL PRIMARY KEY,
+    backtest_id INT NOT NULL REFERENCES backtest_results(backtest_id) ON DELETE CASCADE,
+
+    -- Trade execution
+    entry_timestamp TIMESTAMPTZ NOT NULL,
+    exit_timestamp TIMESTAMPTZ NOT NULL,
+    direction VARCHAR(10) NOT NULL, -- 'LONG', 'SHORT'
+
+    -- Prices
+    entry_price NUMERIC NOT NULL,
+    exit_price NUMERIC NOT NULL,
+    stop_loss NUMERIC,
+    take_profit NUMERIC,
+
+    -- Position sizing
+    quantity NUMERIC NOT NULL,
+    position_value NUMERIC NOT NULL,
+
+    -- P&L
+    gross_pnl NUMERIC NOT NULL,
+    fees NUMERIC DEFAULT 0,
+    net_pnl NUMERIC NOT NULL,
+    return_pct NUMERIC NOT NULL,
+
+    -- Trade metadata
+    entry_signal TEXT, -- What triggered entry
+    exit_reason VARCHAR(50), -- 'TAKE_PROFIT', 'STOP_LOSS', 'SIGNAL', 'END_OF_TEST'
+    duration INTERVAL GENERATED ALWAYS AS (exit_timestamp - entry_timestamp) STORED,
+
+    CONSTRAINT chk_direction CHECK (direction IN ('LONG', 'SHORT')),
+    CONSTRAINT chk_exit_after_entry CHECK (exit_timestamp > entry_timestamp),
+    CONSTRAINT chk_quantity_positive CHECK (quantity > 0),
+    CONSTRAINT chk_net_pnl CHECK (net_pnl = gross_pnl - fees)
+);
+
+CREATE INDEX idx_backtest_trades_backtest ON backtest_trades(backtest_id, entry_timestamp);
+CREATE INDEX idx_backtest_trades_performance ON backtest_trades(return_pct DESC);
+CREATE INDEX idx_backtest_trades_duration ON backtest_trades(duration);
+
+COMMENT ON TABLE backtest_trades IS 'Detailed record of individual trades within each backtest';
+
+
+-- ============================================================================
+-- MODEL METADATA TABLE (Track ML Models)
+-- ============================================================================
+CREATE TABLE ml_models (
+    model_id SERIAL PRIMARY KEY,
+    model_name VARCHAR(100) NOT NULL,
+    model_version VARCHAR(50) NOT NULL,
+    model_type VARCHAR(50) NOT NULL, -- 'regression', 'classification', 'timeseries'
+
+    -- Model artifacts
+    model_path TEXT, -- File path to saved model
+    model_hash VARCHAR(64), -- SHA256 of model file for versioning
+
+    -- Training metadata
+    training_start_date DATE,
+    training_end_date DATE,
+    validation_start_date DATE,
+    validation_end_date DATE,
+    features_used TEXT[], -- Array of feature names
+
+    -- Performance metrics
+    train_score NUMERIC,
+    validation_score NUMERIC,
+    test_score NUMERIC,
+    rmse NUMERIC,
+    mae NUMERIC,
+    r2_score NUMERIC,
+
+    -- Hyperparameters
+    hyperparameters JSONB,
+
+    -- Status
+    status VARCHAR(20) DEFAULT 'training', -- 'training', 'validated', 'deployed', 'retired'
+    deployed_at TIMESTAMPTZ,
+    retired_at TIMESTAMPTZ,
+
+    -- Audit
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    created_by VARCHAR(100),
+    notes TEXT,
+
+    UNIQUE(model_name, model_version)
+);
+
+CREATE INDEX idx_ml_models_status ON ml_models(status);
+CREATE INDEX idx_ml_models_deployed ON ml_models(deployed_at DESC) WHERE status = 'deployed';
+
+COMMENT ON TABLE ml_models IS 'Registry of all ML models with metadata and performance tracking';
+COMMENT ON COLUMN ml_models.model_hash IS 'SHA256 hash ensures model reproducibility';

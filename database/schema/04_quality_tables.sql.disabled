@@ -1,0 +1,218 @@
+-- Data Quality, Validation, and Audit Tables
+-- Implement Phase 2: Data Quality & Observability
+
+-- ============================================================================
+-- VALIDATION RULES TABLE (Extensible Constraint Engine)
+-- ============================================================================
+CREATE TABLE validation_rules (
+    rule_id SERIAL PRIMARY KEY,
+    data_type data_type_enum NOT NULL,
+    rule_name VARCHAR(100) NOT NULL,
+    rule_sql TEXT NOT NULL,
+    error_message TEXT NOT NULL,
+    severity VARCHAR(20) DEFAULT 'ERROR', -- 'ERROR', 'WARNING', 'INFO'
+    enabled BOOLEAN DEFAULT TRUE,
+
+    -- Audit
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    created_by VARCHAR(100) DEFAULT 'system',
+
+    UNIQUE(data_type, rule_name)
+);
+
+CREATE INDEX idx_validation_rules_enabled ON validation_rules(data_type) WHERE enabled = TRUE;
+
+COMMENT ON TABLE validation_rules IS 'Extensible validation rules applied per data_type without schema changes';
+COMMENT ON COLUMN validation_rules.rule_sql IS 'SQL expression that must evaluate to TRUE (e.g., "value BETWEEN 0 AND 100")';
+
+
+-- ============================================================================
+-- ANOMALIES TABLE (Automated Quality Issues Detection)
+-- ============================================================================
+CREATE TABLE anomalies (
+    anomaly_id BIGSERIAL PRIMARY KEY,
+    source_id INT NOT NULL REFERENCES sources(source_id) ON DELETE CASCADE,
+    timestamp TIMESTAMPTZ NOT NULL,
+    detected_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+
+    -- Anomaly classification
+    anomaly_type anomaly_type_enum NOT NULL,
+    severity VARCHAR(20) DEFAULT 'MEDIUM', -- 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'
+
+    -- Statistical data
+    value NUMERIC,
+    z_score NUMERIC,
+    expected_value NUMERIC,
+    deviation_pct NUMERIC,
+
+    -- Flags
+    is_blackswan BOOLEAN DEFAULT FALSE, -- z_score > 6
+    reviewed BOOLEAN DEFAULT FALSE,
+    is_false_positive BOOLEAN DEFAULT FALSE,
+
+    -- Resolution
+    resolved_at TIMESTAMPTZ,
+    resolved_by VARCHAR(100),
+    resolution_notes TEXT,
+
+    -- Context
+    context JSONB, -- Additional metadata about the anomaly
+
+    CONSTRAINT fk_anomaly_data FOREIGN KEY (source_id, timestamp)
+        REFERENCES timeseries_data(source_id, timestamp)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX idx_anomalies_source_time ON anomalies(source_id, timestamp DESC);
+CREATE INDEX idx_anomalies_unreviewed ON anomalies(detected_at DESC) WHERE reviewed = FALSE;
+CREATE INDEX idx_anomalies_blackswan ON anomalies(detected_at DESC) WHERE is_blackswan = TRUE;
+CREATE INDEX idx_anomalies_type ON anomalies(anomaly_type, detected_at DESC);
+
+COMMENT ON TABLE anomalies IS 'Automated detection of data quality issues (outliers, missing data, corruption)';
+COMMENT ON COLUMN anomalies.z_score IS 'Statistical z-score if anomaly is an outlier';
+COMMENT ON COLUMN anomalies.is_blackswan IS 'TRUE if z_score > 6 (extremely rare event)';
+
+
+-- ============================================================================
+-- AUDIT LOG TABLE (Complete Change History)
+-- ============================================================================
+CREATE TABLE audit_log (
+    audit_id BIGSERIAL PRIMARY KEY,
+    source_id INT REFERENCES sources(source_id) ON DELETE SET NULL,
+    timestamp TIMESTAMPTZ,
+
+    -- Action details
+    action audit_action_enum NOT NULL,
+    table_name VARCHAR(100) NOT NULL,
+
+    -- Change tracking
+    old_value JSONB,
+    new_value JSONB,
+    changed_fields TEXT[], -- Array of field names that changed
+
+    -- Who and why
+    changed_by VARCHAR(100) NOT NULL DEFAULT 'system',
+    changed_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    reason TEXT,
+
+    -- Context
+    ip_address INET,
+    user_agent TEXT,
+
+    CONSTRAINT chk_change_logged CHECK (
+        action = 'INSERT' AND old_value IS NULL OR
+        action = 'DELETE' AND new_value IS NULL OR
+        action IN ('UPDATE', 'CORRECTION')
+    )
+);
+
+CREATE INDEX idx_audit_log_source ON audit_log(source_id, changed_at DESC);
+CREATE INDEX idx_audit_log_timestamp ON audit_log(timestamp, changed_at DESC);
+CREATE INDEX idx_audit_log_changed_at ON audit_log(changed_at DESC);
+CREATE INDEX idx_audit_log_action ON audit_log(action, changed_at DESC);
+CREATE INDEX idx_audit_log_changed_by ON audit_log(changed_by, changed_at DESC);
+
+COMMENT ON TABLE audit_log IS 'Immutable log of all data modifications for full accountability';
+COMMENT ON COLUMN audit_log.changed_fields IS 'Array of column names modified in this operation';
+COMMENT ON COLUMN audit_log.reason IS 'Human-readable explanation for manual corrections';
+
+
+-- ============================================================================
+-- DATA FRESHNESS MATERIALIZED VIEW
+-- ============================================================================
+CREATE MATERIALIZED VIEW data_freshness AS
+SELECT
+    s.source_id,
+    s.name,
+    s.display_name,
+    s.category,
+    s.data_type,
+    s.update_frequency,
+    s.status,
+
+    -- Timing information
+    MAX(t.timestamp) as last_data_timestamp,
+    s.last_successful_update,
+    s.next_scheduled_update,
+    NOW() - MAX(t.timestamp) as data_age,
+    NOW() - s.last_successful_update as update_age,
+
+    -- Status determination
+    CASE
+        WHEN s.status != 'active' THEN 'INACTIVE'
+        WHEN NOW() - MAX(t.timestamp) > s.update_frequency * 3 THEN 'CRITICAL'
+        WHEN NOW() - MAX(t.timestamp) > s.update_frequency * 2 THEN 'STALE'
+        WHEN NOW() - MAX(t.timestamp) > s.update_frequency * 1.5 THEN 'WARNING'
+        ELSE 'FRESH'
+    END as freshness_status,
+
+    -- Data quality aggregate
+    COUNT(*) as total_records,
+    COUNT(*) FILTER (WHERE t.is_anomaly = TRUE) as anomaly_count,
+    AVG(t.quality_score) as avg_quality_score,
+    MIN(t.quality_score) as min_quality_score
+
+FROM sources s
+LEFT JOIN timeseries_data t USING (source_id)
+GROUP BY s.source_id, s.name, s.display_name, s.category, s.data_type,
+         s.update_frequency, s.status, s.last_successful_update, s.next_scheduled_update;
+
+CREATE UNIQUE INDEX idx_data_freshness_source ON data_freshness(source_id);
+CREATE INDEX idx_data_freshness_status ON data_freshness(freshness_status);
+CREATE INDEX idx_data_freshness_category ON data_freshness(category, freshness_status);
+
+COMMENT ON MATERIALIZED VIEW data_freshness IS 'Real-time overview of data staleness and quality per source';
+
+
+-- ============================================================================
+-- IMMUTABLE ARCHIVE TABLE (Soft Delete Support)
+-- ============================================================================
+CREATE TABLE timeseries_archive (
+    archive_id BIGSERIAL PRIMARY KEY,
+
+    -- Original data (copy of timeseries_data row)
+    source_id INT NOT NULL,
+    timestamp TIMESTAMPTZ(3) NOT NULL,
+    date_only DATE,
+    open NUMERIC(20,8),
+    high NUMERIC(20,8),
+    low NUMERIC(20,8),
+    close NUMERIC(20,8),
+    volume NUMERIC(30,8),
+    value NUMERIC(20,8),
+    quality_score SMALLINT,
+    is_anomaly BOOLEAN,
+
+    -- Archive metadata
+    deleted_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    deleted_by VARCHAR(100) NOT NULL,
+    deletion_reason TEXT,
+
+    -- Allow recovery
+    restored_at TIMESTAMPTZ,
+    restored_by VARCHAR(100)
+);
+
+CREATE INDEX idx_archive_source_time ON timeseries_archive(source_id, timestamp DESC);
+CREATE INDEX idx_archive_deleted_at ON timeseries_archive(deleted_at DESC);
+CREATE INDEX idx_archive_restorable ON timeseries_archive(source_id, timestamp) WHERE restored_at IS NULL;
+
+COMMENT ON TABLE timeseries_archive IS 'Immutable archive of deleted data for recovery and audit trail';
+
+
+-- ============================================================================
+-- VALIDATION RULE SEED DATA
+-- ============================================================================
+
+-- RSI must be 0-100
+INSERT INTO validation_rules (data_type, rule_name, rule_sql, error_message, severity)
+VALUES
+    ('calculated', 'rsi_range', 'value BETWEEN 0 AND 100', 'RSI must be between 0 and 100', 'ERROR'),
+    ('calculated', 'macd_reasonable', 'value BETWEEN -10000 AND 10000', 'MACD histogram exceeds reasonable bounds', 'WARNING'),
+    ('ohlcv', 'volume_positive', 'volume > 0', 'Volume must be positive', 'ERROR'),
+    ('ohlcv', 'price_reasonable', 'close BETWEEN 0.01 AND 10000000', 'Price is outside reasonable range', 'ERROR'),
+    ('simple', 'no_nan', 'value IS NOT NULL', 'Value cannot be NULL for simple data type', 'ERROR'),
+    ('derivative', 'funding_rate_reasonable', 'value BETWEEN -1 AND 1', 'Funding rate exceeds typical bounds', 'WARNING')
+ON CONFLICT (data_type, rule_name) DO NOTHING;
+
+COMMENT ON TABLE validation_rules IS 'Seeded with common validation rules for each data_type';
