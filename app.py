@@ -24,7 +24,7 @@ from src.data import (
     dxy_price_yfinance, btc_dominance_cmc, usdt_dominance_cmc,
     dvol_index_deribit, basis_spread_binance, markov_regime
 )
-from src.data.normalizers import zscore
+from src.data.normalizers import zscore, pct_change_zscore
 from src.data.postgres_provider import get_data as postgres_get_data, get_metadata as postgres_get_metadata
 
 # Application imports - Management
@@ -141,7 +141,28 @@ DATASET_NAME_MAPPING = {
     'psar_btc': 'psar_btc',
 
     # Other
-    'stable_c_d': 'stable_c_d'
+    'stable_c_d': 'stable_c_d',
+
+    # System 2: Velocity-Anchored Oscillators
+    'volume_btc': 'volume_btc',
+    'volume_eth': 'volume_eth',
+    'btc_largetxcount': 'btc_largetxcount',
+    'btc_avgtx': 'btc_avgtx',
+    'btc_socialdominance': 'btc_socialdominance',
+    'btc_postscreated': 'btc_postscreated',
+    'btc_contributorsactive': 'btc_contributorsactive',
+    'btc_contributorscreated': 'btc_contributorscreated',
+    'btc_sendingaddresses': 'btc_sendingaddresses',
+    'btc_receivingaddresses': 'btc_receivingaddresses',
+    'btc_newaddresses': 'btc_newaddresses',
+    'btc_txcount': 'btc_txcount',
+    'usdt_tfsps': 'usdt_tfsps',
+    'btc_meantxfees': 'btc_meantxfees',
+    'btc_activesupply1y': 'btc_activesupply1y',
+    'btc_active1y': 'btc_active1y',
+    'btc_splyadrbal1': 'btc_splyadrbal1',
+    'btc_addressessupply1in10k': 'btc_addressessupply1in10k',
+    'btc_ser': 'btc_ser'
 }
 
 # Add PostgreSQL-only datasets (no JSON plugin, will be fetched via hybrid_provider)
@@ -151,9 +172,48 @@ POSTGRES_ONLY_DATASETS = {
 }
 DATA_PLUGINS.update(POSTGRES_ONLY_DATASETS)
 
-# Normalizer function (using only zscore - Regression Divergence)
+# Normalizer functions
 NORMALIZERS = {
-    'zscore': zscore
+    'zscore': zscore,
+    'pct_change_zscore': pct_change_zscore
+}
+
+# System 2: Velocity-Anchored Oscillators Configuration
+# 22 datasets across 6 categories for momentum divergence detection
+SYSTEM2_DATASETS = {
+    # Derivatives (3)
+    'funding': {'key': 'funding_rate_btc', 'label': 'Funding Rate', 'category': 'Derivatives'},
+    'basis': {'key': 'basis_spread_btc', 'label': 'Basis Spread', 'category': 'Derivatives'},
+    'dvol': {'key': 'dvol_btc', 'label': 'DVOL Index', 'category': 'Derivatives'},
+
+    # Volume & Participation (2)
+    'volume_btc': {'key': 'volume_btc', 'label': 'BTC Volume', 'category': 'Volume'},
+    'volume_eth': {'key': 'volume_eth', 'label': 'ETH Volume', 'category': 'Volume'},
+
+    # Whale Activity (2)
+    'largetx': {'key': 'btc_largetxcount', 'label': 'Large Transaction Count', 'category': 'Whale'},
+    'avgtx': {'key': 'btc_avgtx', 'label': 'Average Transaction Size', 'category': 'Whale'},
+
+    # Social Velocity (4)
+    'social_dominance': {'key': 'btc_socialdominance', 'label': 'Social Dominance', 'category': 'Social'},
+    'posts': {'key': 'btc_postscreated', 'label': 'Posts Created', 'category': 'Social'},
+    'contributors_active': {'key': 'btc_contributorsactive', 'label': 'Active Contributors', 'category': 'Social'},
+    'contributors_new': {'key': 'btc_contributorscreated', 'label': 'New Contributors', 'category': 'Social'},
+
+    # On-Chain Flow (6)
+    'sending_addr': {'key': 'btc_sendingaddresses', 'label': 'Sending Addresses', 'category': 'On-Chain'},
+    'receiving_addr': {'key': 'btc_receivingaddresses', 'label': 'Receiving Addresses', 'category': 'On-Chain'},
+    'new_addr': {'key': 'btc_newaddresses', 'label': 'New Addresses', 'category': 'On-Chain'},
+    'txcount': {'key': 'btc_txcount', 'label': 'Transaction Count', 'category': 'On-Chain'},
+    'tether_flow': {'key': 'usdt_tfsps', 'label': 'USDT Tether Flow', 'category': 'On-Chain'},
+    'mean_fees': {'key': 'btc_meantxfees', 'label': 'Mean Transaction Fees', 'category': 'On-Chain'},
+
+    # Supply Dynamics (5)
+    'active_supply_1y': {'key': 'btc_activesupply1y', 'label': 'Active Supply 1Y', 'category': 'Supply'},
+    'active_1y': {'key': 'btc_active1y', 'label': 'Active 1Y', 'category': 'Supply'},
+    'supply_addr_bal': {'key': 'btc_splyadrbal1', 'label': 'Supply Address Balance', 'category': 'Supply'},
+    'addr_supply_10k': {'key': 'btc_addressessupply1in10k', 'label': 'Addresses Supply 1/10k', 'category': 'Supply'},
+    'ser': {'key': 'btc_ser', 'label': 'Supply Equilibrium Ratio', 'category': 'Supply'}
 }
 
 def align_timestamps(normalized_oscillators):
@@ -718,6 +778,279 @@ def get_oscillator_data():
         import traceback
         traceback.print_exc()
         return jsonify({'error': f'Server error processing oscillator data: {str(e)}'}), 500
+
+
+@app.route('/api/system2-data')
+def get_system2_data():
+    """
+    Fetch all 22 System 2 velocity-anchored oscillators.
+
+    System 2 detects when indicator momentum diverges from BTC momentum using
+    percentage change regression (log returns).
+
+    Query parameters:
+    - asset: 'btc' (default, only BTC supported for System 2)
+    - days: Number of days to fetch (default: 365)
+    - noise_level: Rolling window size for regression (default: 30)
+
+    Returns:
+        JSON with structure matching /api/oscillator-data format:
+        {
+            'data': [
+                {
+                    'name': 'funding',
+                    'label': 'Funding Rate',
+                    'category': 'Derivatives',
+                    'values': [[timestamp, z_score], ...],
+                    'metadata': {...}
+                },
+                ... (22 total datasets)
+            ],
+            'errors': [
+                {'dataset': 'btc_ser', 'error': 'Source not found'}
+            ],
+            'common_timestamps': [ts1, ts2, ...],
+            'regime_data': [[ts, regime_value], ...],
+            'metadata': {
+                'asset': 'btc',
+                'days': 365,
+                'noise_level': 30,
+                'normalizer': 'pct_change_zscore',
+                'total_datasets': 22,
+                'successful': 21,
+                'failed': 1
+            }
+        }
+    """
+    # Parse query parameters
+    asset = request.args.get('asset', 'btc')
+    days_param = request.args.get('days', '365')
+    noise_level = int(request.args.get('noise_level', '30'))
+
+    # Validate parameters
+    if asset != 'btc':
+        return jsonify({'error': 'System 2 only supports asset=btc'}), 400
+
+    try:
+        days = int(days_param)
+    except ValueError:
+        return jsonify({'error': 'days parameter must be an integer'}), 400
+
+    # Validate noise level
+    valid_noise_levels = [14, 30, 50, 100, 200]
+    if noise_level not in valid_noise_levels:
+        return jsonify({'error': f'Invalid noise_level. Must be one of: {valid_noise_levels}'}), 400
+
+    # Generate cache key
+    cache_key = f"system2_{asset}_{days}_{noise_level}"
+
+    # Check cache
+    if is_cache_valid(cache_key):
+        print(f"Serving System 2 data from cache: {cache_key}")
+        return jsonify(cache[cache_key]['data'])
+
+    try:
+        print(f"[System 2] Generating velocity-anchored oscillators for {asset} with window={noise_level}, days={days}")
+
+        # Apply rate limiting
+        rate_limit_check(f"system2_{asset}")
+
+        # Step 1: Fetch BTC price data (OHLCV) for normalization
+        # Request extra days to ensure enough history for rolling window
+        price_days = days + noise_level + 10
+        source_name = DATASET_NAME_MAPPING.get('btc', 'btc_price')
+        btc_ohlcv_data = postgres_get_data(source_name, price_days)
+
+        if not btc_ohlcv_data:
+            return jsonify({'error': 'No BTC price data available'}), 500
+
+        print(f"[System 2] Fetched {len(btc_ohlcv_data)} BTC price points")
+
+        # Step 2: Process each System 2 dataset
+        successful_oscillators = []
+        failed_datasets = []
+        normalized_data_dict = {}  # For finding common timestamps
+
+        for short_name, config in SYSTEM2_DATASETS.items():
+            dataset_key = config['key']
+            dataset_label = config['label']
+            dataset_category = config['category']
+
+            try:
+                # Apply rate limiting
+                rate_limit_check(f"system2_{dataset_key}")
+
+                # Map to database source name
+                source_name = DATASET_NAME_MAPPING.get(dataset_key, dataset_key)
+
+                # Fetch raw dataset
+                raw_data = postgres_get_data(source_name, price_days)
+
+                if not raw_data:
+                    error_msg = f"No data found in database for source: {source_name}"
+                    print(f"[System 2] {error_msg}")
+                    failed_datasets.append({
+                        'dataset': short_name,
+                        'label': dataset_label,
+                        'error': error_msg
+                    })
+                    continue
+
+                print(f"[System 2] Fetched {len(raw_data)} points for {dataset_label}")
+
+                # Normalize using percentage change z-score
+                normalized_data = pct_change_zscore.normalize(
+                    dataset_data=raw_data,
+                    asset_price_data=btc_ohlcv_data,
+                    window=noise_level
+                )
+
+                if not normalized_data:
+                    error_msg = "Normalization returned no data (insufficient history or variance)"
+                    print(f"[System 2] {error_msg} for {dataset_label}")
+                    failed_datasets.append({
+                        'dataset': short_name,
+                        'label': dataset_label,
+                        'error': error_msg
+                    })
+                    continue
+
+                # Trim to requested number of days
+                if normalized_data and days:
+                    cutoff_timestamp = normalized_data[-1][0] - (days * 24 * 60 * 60 * 1000)
+                    normalized_data = [d for d in normalized_data if d[0] >= cutoff_timestamp]
+
+                # Get metadata
+                metadata = postgres_get_metadata(source_name)
+                if not metadata:
+                    metadata = {
+                        'label': dataset_label,
+                        'category': dataset_category,
+                        'source': source_name
+                    }
+
+                # Add normalization metadata
+                metadata['normalizer'] = 'Velocity-Anchored Regression Divergence'
+                metadata['window'] = noise_level
+                metadata['data_points'] = len(normalized_data)
+
+                # Store successful oscillator
+                successful_oscillators.append({
+                    'name': short_name,
+                    'label': dataset_label,
+                    'category': dataset_category,
+                    'values': normalized_data,
+                    'metadata': metadata
+                })
+
+                # Store for timestamp alignment
+                normalized_data_dict[short_name] = normalized_data
+
+                print(f"[System 2] Normalized {dataset_label}: {len(normalized_data)} points")
+
+            except Exception as e:
+                error_msg = str(e)
+                print(f"[System 2] Error processing {dataset_label}: {error_msg}")
+                import traceback
+                traceback.print_exc()
+                failed_datasets.append({
+                    'dataset': short_name,
+                    'label': dataset_label,
+                    'error': error_msg
+                })
+
+        # Step 3: Find common timestamps across all successful oscillators
+        common_timestamps = []
+        if normalized_data_dict:
+            timestamp_sets = [set(item[0] for item in data) for data in normalized_data_dict.values()]
+            common_timestamps = sorted(set.intersection(*timestamp_sets))
+            print(f"[System 2] Found {len(common_timestamps)} common timestamps")
+
+        # Step 4: Get Markov regime data
+        regime_data = []
+        try:
+            # Get regime data aligned to BTC price
+            common_timestamps_set = set(common_timestamps) if common_timestamps else set()
+            if common_timestamps_set:
+                aligned_ohlcv_data = [candle for candle in btc_ohlcv_data if candle[0] in common_timestamps_set]
+            else:
+                aligned_ohlcv_data = btc_ohlcv_data
+
+            # Calculate volatility
+            from src.data import volatility
+            aligned_volatility_data = volatility.calculate_gk_volatility(aligned_ohlcv_data)
+
+            # Fit Markov model
+            fitted_model = markov_regime.fit_markov_model(aligned_volatility_data)
+
+            if fitted_model is not None:
+                regime_data = markov_regime.classify_regimes(fitted_model, aligned_volatility_data)
+                print(f"[System 2] Generated {len(regime_data)} regime points")
+            else:
+                # Fallback to simple threshold
+                print("[System 2] Markov model fitting failed, using threshold-based classification")
+                regime_data = markov_regime.simple_threshold_regimes(aligned_volatility_data)
+
+            # Trim regime data to requested number of days
+            if regime_data and days:
+                cutoff_timestamp = regime_data[-1][0] - (days * 24 * 60 * 60 * 1000)
+                regime_data = [d for d in regime_data if d[0] >= cutoff_timestamp]
+
+        except Exception as e:
+            print(f"[System 2] Error generating regime data: {e}")
+            import traceback
+            traceback.print_exc()
+            # Continue without regime data
+
+        # Step 5: Transform to breakdown format (matching /api/oscillator-data structure)
+        breakdown = {}
+        for oscillator in successful_oscillators:
+            breakdown[oscillator['name']] = {
+                'data': oscillator['values'],  # Rename 'values' to 'data'
+                'metadata': {
+                    'label': oscillator['label'],
+                    'category': oscillator['category'],
+                    'color': '#00D9FF',  # Cyan for velocity-anchored oscillators
+                    **oscillator['metadata']  # Include all original metadata
+                }
+            }
+
+        # Step 6: Build response
+        result = {
+            'mode': 'system2',
+            'asset': asset,
+            'noise_level': noise_level,
+            'breakdown': breakdown,  # Changed from 'data' array to 'breakdown' object
+            'regime_data': regime_data,
+            'common_timestamps': common_timestamps,
+            'errors': failed_datasets,
+            'metadata': {
+                'system': 'System 2: Velocity-Anchored Oscillators',
+                'normalizer': 'pct_change_zscore',
+                'total_datasets': len(SYSTEM2_DATASETS),
+                'successful': len(breakdown),
+                'failed': len(failed_datasets),
+                'days': days,
+                'noise_level': noise_level
+            }
+        }
+
+        print(f"[System 2] Successfully processed {len(successful_oscillators)}/{len(SYSTEM2_DATASETS)} datasets")
+
+        # Store in cache
+        cache[cache_key] = {
+            'data': result,
+            'timestamp': time.time()
+        }
+
+        return jsonify(result)
+
+    except Exception as e:
+        print(f"Error processing System 2 data: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Server error processing System 2 data: {str(e)}'}), 500
+
 
 @app.route('/api/clear-cache')
 def clear_cache():

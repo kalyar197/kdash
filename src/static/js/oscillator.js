@@ -732,7 +732,19 @@ export function syncOscillatorZoom(asset, transform) {
         `breakdown-${asset}`,              // Momentum
         `breakdown-price-${asset}`,        // Price
         `breakdown-macro-${asset}`,        // Macro
-        `breakdown-derivatives-${asset}`   // Derivatives
+        `breakdown-derivatives-${asset}`,  // Derivatives
+        // System 2 charts
+        'system2-funding', 'system2-basis', 'system2-dvol',
+        'system2-volume_btc', 'system2-volume_eth',
+        'system2-largetx', 'system2-avgtx',
+        'system2-social_dominance', 'system2-posts',
+        'system2-contributors_active', 'system2-contributors_new',
+        'system2-sending_addr', 'system2-receiving_addr',
+        'system2-new_addr', 'system2-txcount',
+        'system2-tether_flow', 'system2-mean_fees',
+        'system2-active_supply_1y', 'system2-active_1y',
+        'system2-supply_addr_bal', 'system2-addr_supply_10k',
+        'system2-ser'
     ];
 
     breakdownKeys.forEach(key => {

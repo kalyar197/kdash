@@ -4,7 +4,7 @@
  */
 
 // Import functions from modules
-import { getDatasetData } from './api.js';
+import { getDatasetData, getSystem2Data } from './api.js';
 import { initChart, renderChart, initFundingRateChart, renderFundingRateChart } from './chart.js';
 import {
     initOscillatorChart, renderOscillatorChart, initBreakdownChart, renderBreakdownChart
@@ -72,6 +72,11 @@ const appState = {
     // Regime data state (for price chart background)
     regimeData: {
         btc: null
+    },
+    // System 2: Velocity-Anchored Oscillators state
+    system2Initialized: false,
+    system2Data: {
+        btc: {}
     },
     // Global date extent for synchronized chart alignment
     globalDateExtent: null
@@ -152,6 +157,17 @@ function setupTabs() {
 
             // Update state
             appState.activeTab = tabName;
+
+            // Load tab-specific data
+            if (tabName === 'main') {
+                await loadTab('btc');
+            } else if (tabName === 'system1') {
+                await loadSystem1Tab('btc');
+            } else if (tabName === 'system2') {
+                await loadSystem2Tab('btc');
+            } else if (tabName === 'system3') {
+                await loadSystem3Tab('btc');
+            }
         });
     });
 }
@@ -175,13 +191,20 @@ function setupTimeControls() {
 
             // Update state and reload chart
             appState.days[dataset] = days;
-            await loadChartData(dataset);
-            await loadOscillatorData(dataset);
-            await loadBreakdownOscillatorData(dataset);
-            await loadBreakdownPriceOscillatorData(dataset);
-            await loadMacroOscillatorData(dataset);
-            await loadBreakdownDerivativesOscillatorData(dataset);
-            await loadFundingRateData(dataset);
+
+            // Check which tab is active and reload appropriate data
+            if (appState.activeTab === 'system2') {
+                await loadSystem2Tab(dataset);
+            } else {
+                // Main tab - reload all charts
+                await loadChartData(dataset);
+                await loadOscillatorData(dataset);
+                await loadBreakdownOscillatorData(dataset);
+                await loadBreakdownPriceOscillatorData(dataset);
+                await loadMacroOscillatorData(dataset);
+                await loadBreakdownDerivativesOscillatorData(dataset);
+                await loadFundingRateData(dataset);
+            }
         });
     });
 }
@@ -236,12 +259,17 @@ function setupNoiseLevelControls() {
 
             console.log(`Noise level changed for ${asset}: ${level}`);
 
-            // Reload all oscillator charts with new noise level
-            await loadOscillatorData(asset);
-            await loadBreakdownOscillatorData(asset);
-            await loadBreakdownPriceOscillatorData(asset);
-            await loadMacroOscillatorData(asset);
-            await loadBreakdownDerivativesOscillatorData(asset);
+            // Check which tab is active and reload appropriate data
+            if (appState.activeTab === 'system2') {
+                await loadSystem2Tab(asset);
+            } else {
+                // Main tab - reload all oscillator charts with new noise level
+                await loadOscillatorData(asset);
+                await loadBreakdownOscillatorData(asset);
+                await loadBreakdownPriceOscillatorData(asset);
+                await loadMacroOscillatorData(asset);
+                await loadBreakdownDerivativesOscillatorData(asset);
+            }
         });
     });
 }
@@ -322,6 +350,101 @@ async function loadTab(dataset) {
 
     // Load funding rate data
     await loadFundingRateData(dataset);
+}
+
+/**
+ * Load System 2: Velocity-Anchored Oscillators tab
+ * Displays 22 breakdown oscillators across 6 categories
+ * @param {string} asset - Asset symbol ('btc')
+ */
+async function loadSystem2Tab(asset) {
+    console.log(`Loading System 2 tab for ${asset}`);
+
+    // Define all 22 System 2 datasets organized by category
+    const system2Datasets = {
+        'Derivatives': ['funding', 'basis', 'dvol'],
+        'Volume': ['volume_btc', 'volume_eth'],
+        'Whale': ['largetx', 'avgtx'],
+        'Social': ['social_dominance', 'posts', 'contributors_active', 'contributors_new'],
+        'On-Chain': ['sending_addr', 'receiving_addr', 'new_addr', 'txcount', 'tether_flow', 'mean_fees'],
+        'Supply': ['active_supply_1y', 'active_1y', 'supply_addr_bal', 'addr_supply_10k', 'ser']
+    };
+
+    // Flatten to get all dataset keys
+    const allDatasets = Object.values(system2Datasets).flat();
+
+    // Initialize all 22 charts if not already initialized
+    if (!appState.system2Initialized) {
+        console.log('Initializing System 2 charts...');
+
+        for (const dataset of allDatasets) {
+            const containerId = `system2-${dataset}-chart`;
+            const chartKey = `system2-${dataset}`; // Unique key for each chart
+            console.log(`Initializing chart: ${containerId} with key ${chartKey}`);
+            initBreakdownChart(containerId, chartKey);
+        }
+
+        appState.system2Initialized = true;
+        console.log('System 2 charts initialized');
+    }
+
+    // Fetch System 2 data
+    console.log('Fetching System 2 data...');
+    try {
+        const days = appState.days[asset] || 30; // Use state or default to 30 days
+        const noiseLevel = appState.noiseLevel[asset] || 30;
+
+        const result = await getSystem2Data(asset, days, noiseLevel);
+
+        if (!result || !result.breakdown) {
+            throw new Error('No System 2 data available');
+        }
+
+        console.log(`Received System 2 data with ${Object.keys(result.breakdown).length} oscillators`);
+
+        // Store data in state
+        appState.system2Data[asset] = result;
+
+        // Render each oscillator chart
+        for (const [key, oscillatorData] of Object.entries(result.breakdown)) {
+            const chartKey = `system2-${key}`; // Must match the key used in initialization
+
+            // Format data for renderBreakdownChart (expects object with single key)
+            const dataObj = {
+                [key]: {
+                    data: oscillatorData.data,
+                    metadata: oscillatorData.metadata
+                }
+            };
+
+            console.log(`Rendering ${key} (${oscillatorData.data.length} points) to chart ${chartKey}`);
+            renderBreakdownChart(chartKey, dataObj, appState.globalDateExtent);
+        }
+
+        console.log('System 2 tab loaded successfully');
+
+    } catch (error) {
+        console.error('Error loading System 2 data:', error);
+        // Show error message (could add UI feedback here)
+    }
+}
+
+/**
+ * Load System 1 tab (Placeholder)
+ * TODO: Implement System 1: Correlation-Based Oscillators
+ */
+async function loadSystem1Tab(asset) {
+    console.log(`System 1 tab clicked for ${asset} - Coming soon`);
+    // Placeholder for System 1 implementation
+}
+
+/**
+ * Load System 3 tab (Placeholder)
+ * TODO: Implement System 3: Advanced Analytics
+ */
+async function loadSystem3Tab(asset) {
+    console.log(`System 3 tab clicked for ${asset} - Coming soon`);
+    // Placeholder for System 3 implementation
 }
 
 /**

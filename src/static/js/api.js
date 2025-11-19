@@ -56,3 +56,33 @@ export async function getDatasetData(dataset, days = '365', options = {}) {
         throw error;
     }
 }
+
+/**
+ * Fetches System 2 velocity-anchored oscillator data
+ * @param {string} asset - The asset symbol (currently only 'btc' supported)
+ * @param {string|number} days - The number of days to fetch (default: 365)
+ * @param {number} noiseLevel - Rolling window size for regression (default: 30)
+ * @returns {Promise<Object>} Object containing breakdown oscillators and regime data
+ * @throws {Error} If the fetch request fails
+ */
+export async function getSystem2Data(asset = 'btc', days = 365, noiseLevel = 30) {
+    try {
+        const url = `${API_BASE_URL}/api/system2-data?asset=${asset}&days=${days}&noise_level=${noiseLevel}`;
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        if (!data.breakdown) {
+            console.warn('[System 2] Response missing breakdown data');
+        }
+
+        return data;
+    } catch (error) {
+        console.error(`Error fetching System 2 data for ${asset}:`, error);
+        throw error;
+    }
+}

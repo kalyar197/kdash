@@ -589,6 +589,9 @@
     <!-- Tab Navigation -->
     <div class="tabs">
         <button class="tab-btn active" data-tab="main">Main</button>
+        <button class="tab-btn" data-tab="system1">System 1</button>
+        <button class="tab-btn" data-tab="system2">System 2</button>
+        <button class="tab-btn" data-tab="system3">System 3</button>
     </div>
 
     <!-- Main Tab Content -->
@@ -687,6 +690,80 @@
             -->
 
         </div>
+    </div>
+
+    <!-- System 2 Tab Content -->
+    <div class="tab-content" id="system2-tab">
+        <h2 style="color: #00D9FF; text-align: center; margin: 20px 0;">System 2: Velocity-Anchored Oscillators</h2>
+
+        <!-- System 2 Controls -->
+        <div class="controls" style="margin-bottom: 20px;">
+            <div class="button-container control-group">
+                <button class="time-btn" data-dataset="btc" data-days="7">1W</button>
+                <button class="time-btn" data-dataset="btc" data-days="30">1M</button>
+                <button class="time-btn active" data-dataset="btc" data-days="180">6M</button>
+                <button class="time-btn" data-dataset="btc" data-days="1095">3Y</button>
+            </div>
+            <div class="button-container control-group" style="margin-left: 20px;">
+                <button class="noise-btn" data-asset="btc" data-level="60">Max</button>
+                <button class="noise-btn" data-asset="btc" data-level="45">Med-High</button>
+                <button class="noise-btn active" data-asset="btc" data-level="30">Default</button>
+                <button class="noise-btn" data-asset="btc" data-level="21">Med-Low</button>
+                <button class="noise-btn" data-asset="btc" data-level="14">Min</button>
+            </div>
+        </div>
+
+        <!-- Derivatives Category -->
+        <h3 style="color: #888; margin: 30px 0 15px 0;">Derivatives</h3>
+        <div id="system2-funding-chart" style="min-height: 200px;"></div>
+        <div id="system2-basis-chart" style="min-height: 200px;"></div>
+        <div id="system2-dvol-chart" style="min-height: 200px;"></div>
+
+        <!-- Volume Category -->
+        <h3 style="color: #888; margin: 30px 0 15px 0;">Volume</h3>
+        <div id="system2-volume_btc-chart" style="min-height: 200px;"></div>
+        <div id="system2-volume_eth-chart" style="min-height: 200px;"></div>
+
+        <!-- Whale Category -->
+        <h3 style="color: #888; margin: 30px 0 15px 0;">Whale</h3>
+        <div id="system2-largetx-chart" style="min-height: 200px;"></div>
+        <div id="system2-avgtx-chart" style="min-height: 200px;"></div>
+
+        <!-- Social Category -->
+        <h3 style="color: #888; margin: 30px 0 15px 0;">Social</h3>
+        <div id="system2-social_dominance-chart" style="min-height: 200px;"></div>
+        <div id="system2-posts-chart" style="min-height: 200px;"></div>
+        <div id="system2-contributors_active-chart" style="min-height: 200px;"></div>
+        <div id="system2-contributors_new-chart" style="min-height: 200px;"></div>
+
+        <!-- On-Chain Category -->
+        <h3 style="color: #888; margin: 30px 0 15px 0;">On-Chain</h3>
+        <div id="system2-sending_addr-chart" style="min-height: 200px;"></div>
+        <div id="system2-receiving_addr-chart" style="min-height: 200px;"></div>
+        <div id="system2-new_addr-chart" style="min-height: 200px;"></div>
+        <div id="system2-txcount-chart" style="min-height: 200px;"></div>
+        <div id="system2-tether_flow-chart" style="min-height: 200px;"></div>
+        <div id="system2-mean_fees-chart" style="min-height: 200px;"></div>
+
+        <!-- Supply Category -->
+        <h3 style="color: #888; margin: 30px 0 15px 0;">Supply</h3>
+        <div id="system2-active_supply_1y-chart" style="min-height: 200px;"></div>
+        <div id="system2-active_1y-chart" style="min-height: 200px;"></div>
+        <div id="system2-supply_addr_bal-chart" style="min-height: 200px;"></div>
+        <div id="system2-addr_supply_10k-chart" style="min-height: 200px;"></div>
+        <div id="system2-ser-chart" style="min-height: 200px;"></div>
+    </div>
+
+    <!-- System 1 Tab Content (Placeholder) -->
+    <div class="tab-content" id="system1-tab">
+        <h2 style="color: #FF9500; text-align: center; margin: 20px 0;">System 1: Correlation-Based Oscillators</h2>
+        <p style="text-align: center; color: #888;">Coming soon...</p>
+    </div>
+
+    <!-- System 3 Tab Content (Placeholder) -->
+    <div class="tab-content" id="system3-tab">
+        <h2 style="color: #FF375F; text-align: center; margin: 20px 0;">System 3: Advanced Analytics</h2>
+        <p style="text-align: center; color: #888;">Coming soon...</p>
     </div>
 
     <div class="tooltip" id="tooltip"></div>
