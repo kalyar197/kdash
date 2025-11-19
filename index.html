@@ -136,7 +136,20 @@
             padding: 20px;
             overflow-x: auto;
         }
-        
+
+        /* System 2 chart containers */
+        .chart-container {
+            background: #1a1a1a;
+            border-radius: 12px;
+            border: 1px solid #2a2a2a;
+            width: 100%;
+            min-height: 300px;
+            height: 300px;
+            position: relative;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
         .loading, .error { 
             position: absolute; 
             top: 50%; 
@@ -705,53 +718,53 @@
                 <button class="time-btn" data-dataset="btc" data-days="1095">3Y</button>
             </div>
             <div class="button-container control-group" style="margin-left: 20px;">
-                <button class="noise-btn" data-asset="btc" data-level="60">Max</button>
-                <button class="noise-btn" data-asset="btc" data-level="45">Med-High</button>
-                <button class="noise-btn active" data-asset="btc" data-level="30">Default</button>
-                <button class="noise-btn" data-asset="btc" data-level="21">Med-Low</button>
-                <button class="noise-btn" data-asset="btc" data-level="14">Min</button>
+                <button class="noise-btn" data-asset="btc" data-level="14">Max</button>
+                <button class="noise-btn active" data-asset="btc" data-level="30">Med-High</button>
+                <button class="noise-btn" data-asset="btc" data-level="50">Default</button>
+                <button class="noise-btn" data-asset="btc" data-level="100">Med-Low</button>
+                <button class="noise-btn" data-asset="btc" data-level="200">Min</button>
             </div>
         </div>
 
         <!-- Derivatives Category -->
         <h3 style="color: #888; margin: 30px 0 15px 0;">Derivatives</h3>
-        <div id="system2-funding-chart" style="min-height: 200px;"></div>
-        <div id="system2-basis-chart" style="min-height: 200px;"></div>
-        <div id="system2-dvol-chart" style="min-height: 200px;"></div>
+        <div id="system2-funding-chart" class="chart-container"></div>
+        <div id="system2-basis-chart" class="chart-container"></div>
+        <div id="system2-dvol-chart" class="chart-container"></div>
 
         <!-- Volume Category -->
         <h3 style="color: #888; margin: 30px 0 15px 0;">Volume</h3>
-        <div id="system2-volume_btc-chart" style="min-height: 200px;"></div>
-        <div id="system2-volume_eth-chart" style="min-height: 200px;"></div>
+        <div id="system2-volume_btc-chart" class="chart-container"></div>
+        <div id="system2-volume_eth-chart" class="chart-container"></div>
 
         <!-- Whale Category -->
         <h3 style="color: #888; margin: 30px 0 15px 0;">Whale</h3>
-        <div id="system2-largetx-chart" style="min-height: 200px;"></div>
-        <div id="system2-avgtx-chart" style="min-height: 200px;"></div>
+        <div id="system2-largetx-chart" class="chart-container"></div>
+        <div id="system2-avgtx-chart" class="chart-container"></div>
 
         <!-- Social Category -->
         <h3 style="color: #888; margin: 30px 0 15px 0;">Social</h3>
-        <div id="system2-social_dominance-chart" style="min-height: 200px;"></div>
-        <div id="system2-posts-chart" style="min-height: 200px;"></div>
-        <div id="system2-contributors_active-chart" style="min-height: 200px;"></div>
-        <div id="system2-contributors_new-chart" style="min-height: 200px;"></div>
+        <div id="system2-social_dominance-chart" class="chart-container"></div>
+        <div id="system2-posts-chart" class="chart-container"></div>
+        <div id="system2-contributors_active-chart" class="chart-container"></div>
+        <div id="system2-contributors_new-chart" class="chart-container"></div>
 
         <!-- On-Chain Category -->
         <h3 style="color: #888; margin: 30px 0 15px 0;">On-Chain</h3>
-        <div id="system2-sending_addr-chart" style="min-height: 200px;"></div>
-        <div id="system2-receiving_addr-chart" style="min-height: 200px;"></div>
-        <div id="system2-new_addr-chart" style="min-height: 200px;"></div>
-        <div id="system2-txcount-chart" style="min-height: 200px;"></div>
-        <div id="system2-tether_flow-chart" style="min-height: 200px;"></div>
-        <div id="system2-mean_fees-chart" style="min-height: 200px;"></div>
+        <div id="system2-sending_addr-chart" class="chart-container"></div>
+        <div id="system2-receiving_addr-chart" class="chart-container"></div>
+        <div id="system2-new_addr-chart" class="chart-container"></div>
+        <div id="system2-txcount-chart" class="chart-container"></div>
+        <div id="system2-tether_flow-chart" class="chart-container"></div>
+        <div id="system2-mean_fees-chart" class="chart-container"></div>
 
         <!-- Supply Category -->
         <h3 style="color: #888; margin: 30px 0 15px 0;">Supply</h3>
-        <div id="system2-active_supply_1y-chart" style="min-height: 200px;"></div>
-        <div id="system2-active_1y-chart" style="min-height: 200px;"></div>
-        <div id="system2-supply_addr_bal-chart" style="min-height: 200px;"></div>
-        <div id="system2-addr_supply_10k-chart" style="min-height: 200px;"></div>
-        <div id="system2-ser-chart" style="min-height: 200px;"></div>
+        <div id="system2-active_supply_1y-chart" class="chart-container"></div>
+        <div id="system2-active_1y-chart" class="chart-container"></div>
+        <div id="system2-supply_addr_bal-chart" class="chart-container"></div>
+        <div id="system2-addr_supply_10k-chart" class="chart-container"></div>
+        <div id="system2-ser-chart" class="chart-container"></div>
     </div>
 
     <!-- System 1 Tab Content (Placeholder) -->
@@ -768,6 +781,6 @@
 
     <div class="tooltip" id="tooltip"></div>
 
-    <script type="module" src="/js/main.js"></script>
+    <script type="module" src="/js/main.js?v=20251119"></script>
 </body>
 </html>
