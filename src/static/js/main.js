@@ -4,10 +4,11 @@
  */
 
 // Import functions from modules
-import { getDatasetData, getSystem2Data } from './api.js';
+import { getDatasetData, getSystem2Data, getSystem3Data } from './api.js';
 import { initChart, renderChart, initFundingRateChart, renderFundingRateChart } from './chart.js';
 import {
-    initOscillatorChart, renderOscillatorChart, initBreakdownChart, renderBreakdownChart
+    initOscillatorChart, renderOscillatorChart, initBreakdownChart, renderBreakdownChart,
+    renderTensionChart
 } from './oscillator.js';
 
 // Application state
@@ -15,7 +16,8 @@ const appState = {
     activeTab: 'main',         // Current active tab
     days: {
         main: { btc: 180 },         // Main tab: Default 6M for BTC
-        system2: { btc: 180 }       // System 2 tab: Default 6M for BTC
+        system2: { btc: 180 },      // System 2 tab: Default 6M for BTC
+        system3: { btc: 180 }       // System 3 tab: Default 6M for BTC
     },
     chartData: {
         btc: null
@@ -57,7 +59,8 @@ const appState = {
     // Noise level state (tab-specific for independent control)
     noiseLevel: {
         main: { btc: 50 },          // Main tab: Default noise level
-        system2: { btc: 30 }        // System 2 tab: Default noise level
+        system2: { btc: 30 },       // System 2 tab: Default noise level
+        system3: { btc: 30 }        // System 3 tab: Default window size
     },
     compositeMode: true,  // Use composite oscillator mode by default
     // Overlay state (moving averages on price chart)
@@ -79,6 +82,11 @@ const appState = {
     system2Initialized: false,
     system2Data: {
         btc: {}
+    },
+    // System 3: Tension² Pairs Oscillator state
+    system3Initialized: false,
+    system3Data: {
+        btc: {}  // Stores data by category (A-F)
     },
     // Global date extent for synchronized chart alignment
     globalDateExtent: null
@@ -471,12 +479,135 @@ async function loadSystem1Tab(asset) {
 }
 
 /**
- * Load System 3 tab (Placeholder)
- * TODO: Implement System 3: Advanced Analytics
+ * Load System 3: Tension² Pairs Oscillator tab
+ * Displays 20 pairs across 6 categories (A-F)
+ * Each pair shows Tension₁ (raw divergence) and Tension₂ (abnormality score)
+ * @param {string} asset - Asset symbol ('btc')
  */
 async function loadSystem3Tab(asset) {
-    console.log(`System 3 tab clicked for ${asset} - Coming soon`);
-    // Placeholder for System 3 implementation
+    console.log(`Loading System 3 tab for ${asset}`);
+
+    // Define all 6 categories for System 3
+    const categories = ['A', 'B', 'C', 'D', 'E', 'F'];
+    const categoryLabels = {
+        'A': 'Volatility',
+        'B': 'Sentiment vs Participation',
+        'C': 'Whale vs Retail',
+        'D': 'Supply Dynamics',
+        'E': 'Macro vs Crypto',
+        'F': 'DeFi vs CeFi'
+    };
+
+    // Category to pair counts (total 15 pairs)
+    const categoryPairCounts = {
+        'A': 3, 'B': 1, 'C': 4, 'D': 3, 'E': 3, 'F': 1
+    };
+
+    // Initialize all 15 charts if not already initialized
+    if (!appState.system3Initialized) {
+        console.log('Initializing System 3 charts...');
+
+        let pairIndex = 1;
+        for (const category of categories) {
+            const pairCount = categoryPairCounts[category];
+            for (let i = 0; i < pairCount; i++) {
+                const containerId = `system3-pair-${pairIndex}-chart`;
+                const chartKey = `system3-pair-${pairIndex}`;
+                console.log(`Initializing chart: ${containerId} with key ${chartKey}`);
+                initBreakdownChart(containerId, chartKey);
+                pairIndex++;
+            }
+        }
+
+        appState.system3Initialized = true;
+        console.log('System 3 charts initialized (15 pairs)');
+    }
+
+    // Fetch and render data for all categories
+    console.log('Fetching System 3 data for all categories...');
+    try {
+        // Use System 3 tab-specific state
+        const days = appState.days.system3[asset] || 180;
+        const window = appState.noiseLevel.system3[asset] || 30;  // Window size for z-score
+
+        console.log(`[System 3] Loading data: ${days} days, window ${window}`);
+
+        // Track all timestamps for global extent
+        const allTimestamps = [];
+        let pairIndex = 1;
+
+        // Load each category sequentially
+        for (const category of categories) {
+            console.log(`[System 3] Loading category ${category}: ${categoryLabels[category]}`);
+
+            const result = await getSystem3Data(category, asset, days, window);
+
+            if (!result || !result.pairs) {
+                console.warn(`No data for category ${category}`);
+                continue;
+            }
+
+            console.log(`[System 3] Received ${result.pairs.length} pairs for category ${category}`);
+
+            // Store category data
+            if (!appState.system3Data[asset]) {
+                appState.system3Data[asset] = {};
+            }
+            appState.system3Data[asset][category] = result;
+
+            // Extract timestamps and render each pair
+            for (const pairData of result.pairs) {
+                // Collect timestamps for global extent
+                if (pairData.tension2 && pairData.tension2.length > 0) {
+                    pairData.tension2.forEach(point => {
+                        if (point && point[0]) {
+                            allTimestamps.push(new Date(point[0]));
+                        }
+                    });
+                }
+
+                // Render the pair
+                const chartKey = `system3-pair-${pairIndex}`;
+                console.log(`[System 3] Rendering pair ${pairIndex}: ${pairData.name} to chart ${chartKey}`);
+                console.log(`  - Tension₁: ${pairData.tension1.length} points`);
+                console.log(`  - Tension₂: ${pairData.tension2.length} points`);
+
+                // Use renderTensionChart (will be aligned after globalDateExtent is set)
+                renderTensionChart(chartKey, pairData, appState.globalDateExtent);
+
+                pairIndex++;
+            }
+        }
+
+        // Update global date extent from all timestamps
+        if (allTimestamps.length > 0) {
+            appState.globalDateExtent = d3.extent(allTimestamps);
+            console.log(`[System 3] Updated globalDateExtent: ${appState.globalDateExtent[0]} to ${appState.globalDateExtent[1]}`);
+
+            // Re-render all charts with aligned x-axis
+            console.log('[System 3] Re-rendering charts with aligned time axis...');
+            let pairIndex = 1;
+            for (const category of categories) {
+                const categoryData = appState.system3Data[asset]?.[category];
+                if (!categoryData || !categoryData.pairs) continue;
+
+                for (const pairData of categoryData.pairs) {
+                    const chartKey = `system3-pair-${pairIndex}`;
+                    renderTensionChart(chartKey, pairData, appState.globalDateExtent);
+                    pairIndex++;
+                }
+            }
+        } else {
+            console.warn('[System 3] No timestamps found, globalDateExtent set to null');
+            appState.globalDateExtent = null;
+        }
+
+        console.log('System 3 tab loaded successfully');
+
+    } catch (error) {
+        console.error('Error loading System 3 data:', error);
+        // Show error message (could add UI feedback here)
+    }
 }
 
 /**

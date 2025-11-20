@@ -28,8 +28,8 @@ export function initOscillatorChart(containerId, asset, assetColor) {
     // Get container dimensions
     const containerRect = container.getBoundingClientRect();
     const margin = { top: 20, right: 60, bottom: 40, left: 60 };
-    const width = containerRect.width - margin.left - margin.right;
-    const height = containerRect.height - margin.top - margin.bottom;
+    const width = Math.max(containerRect.width - margin.left - margin.right, 100);  // Minimum 100px
+    const height = Math.max(containerRect.height - margin.top - margin.bottom, 70);  // Minimum 70px
 
     // Create SVG with viewBox for responsive scaling
     const svg = d3.select(`#${containerId}`)
@@ -178,8 +178,8 @@ export function initBreakdownChart(containerId, asset) {
     // Get container dimensions
     const containerRect = container.getBoundingClientRect();
     const margin = { top: 30, right: 60, bottom: 40, left: 60 };  // Extra top margin for legend
-    const width = containerRect.width - margin.left - margin.right;
-    const height = containerRect.height - margin.top - margin.bottom;
+    const width = Math.max(containerRect.width - margin.left - margin.right, 100);  // Minimum 100px
+    const height = Math.max(containerRect.height - margin.top - margin.bottom, 70);  // Minimum 70px
 
     // Create SVG with viewBox for responsive scaling
     const svg = d3.select(`#${containerId}`)
@@ -515,15 +515,19 @@ function renderRegimeBackground(chart, regimeData, metadata) {
 
         const x1 = chart.xScale(new Date(segment.startTime));
         const x2 = chart.xScale(new Date(segment.endTime));
-        const width = x2 - x1 || 2;  // Minimum width of 2px
+        const width = Math.max(x2 - x1, 2);  // Minimum width of 2px, ensure non-negative
+        const height = Math.max(chart.height || 0, 0);  // Ensure non-negative height
+
+        // Skip rendering if dimensions are invalid
+        if (width <= 0 || height <= 0) return;
 
         chart.linesGroup.insert('rect', ':first-child')  // Insert at beginning (background)
             .attr('class', `regime-background regime-${segment.regime}`)
             .attr('data-regime-index', index)  // Add unique identifier for zoom updates
-            .attr('x', x1)
+            .attr('x', Math.min(x1, x2))  // Use minimum x to handle reversed coordinates
             .attr('y', 0)
             .attr('width', width)
-            .attr('height', chart.height)
+            .attr('height', height)
             .style('fill', state.color)
             .style('opacity', 1);
     });
@@ -546,11 +550,14 @@ function updateRegimeRectangles(chart, newXScale) {
 
         const x1 = newXScale(new Date(segment.startTime));
         const x2 = newXScale(new Date(segment.endTime));
-        const width = x2 - x1 || 2;  // Minimum width of 2px
+        const width = Math.max(x2 - x1, 2);  // Minimum width of 2px, ensure non-negative
+
+        // Skip if width is invalid
+        if (width <= 0) return;
 
         // Update rectangle by data-regime-index attribute
         chart.linesGroup.select(`[data-regime-index="${index}"]`)
-            .attr('x', x1)
+            .attr('x', Math.min(x1, x2))  // Use minimum x to handle reversed coordinates
             .attr('width', width);
     });
 }
@@ -1168,5 +1175,176 @@ export function getOscillatorChart(asset) {
  */
 export function getBreakdownChart(asset) {
     return breakdownInstances[asset];
+}
+
+/**
+ * Render tension chart with two lines (Tension₁ and Tension₂) and signal overlays
+ * @param {string} chartKey - Chart identifier (e.g., 'system3-pair-1')
+ * @param {Object} pairData - Pair data containing tension1, tension2, and metadata
+ * @param {Array} forcedDomain - Optional forced x-domain for alignment [minDate, maxDate]
+ */
+export function renderTensionChart(chartKey, pairData, forcedDomain = null) {
+    const chart = breakdownInstances[chartKey];
+
+    if (!chart) {
+        console.error(`Chart instance not found for: ${chartKey}`);
+        return;
+    }
+
+    console.log(`Rendering tension chart: ${chartKey}`, pairData);
+
+    // Clear existing elements
+    chart.linesGroup.selectAll('*').remove();
+    chart.legendGroup.selectAll('*').remove();
+
+    // Extract data
+    const tension1Data = pairData.tension1 || [];
+    const tension2Data = pairData.tension2 || [];
+
+    if (tension1Data.length === 0 && tension2Data.length === 0) {
+        console.warn(`No data for chart: ${chartKey}`);
+        return;
+    }
+
+    // Collect all timestamps and values for domain calculation
+    const allTimestamps = [
+        ...tension1Data.map(d => new Date(d[0])),
+        ...tension2Data.map(d => new Date(d[0]))
+    ];
+    const allValues = [
+        ...tension1Data.map(d => d[1]),
+        ...tension2Data.map(d => d[1])
+    ].filter(v => v !== null && !isNaN(v));
+
+    // Update X scale domain (use forcedDomain for alignment across charts)
+    const xExtent = forcedDomain || d3.extent(allTimestamps);
+    chart.xScale.domain(xExtent);
+
+    // Update Y scale domain (symmetric around 0, minimum range ±3.5)
+    const yExtent = d3.extent(allValues);
+    const yMax = Math.max(Math.abs(yExtent[0] || 0), Math.abs(yExtent[1] || 0), 3.5);
+    chart.yScale.domain([-yMax, yMax]);
+
+    // Update axes
+    chart.xAxisGroup.call(chart.xAxis);
+    chart.yAxisGroup.call(chart.yAxis);
+
+    // Update zero line position
+    chart.zeroLine
+        .attr('x1', 0)
+        .attr('x2', chart.width)
+        .attr('y1', chart.yScale(0))
+        .attr('y2', chart.yScale(0));
+
+    // Define line generator
+    const lineGenerator = d3.line()
+        .x(d => chart.xScale(new Date(d[0])))
+        .y(d => chart.yScale(d[1]))
+        .defined(d => d[1] !== null && !isNaN(d[1]))
+        .curve(d3.curveMonotoneX);
+
+    // Render Tension₁ line (blue)
+    if (tension1Data.length > 0) {
+        chart.linesGroup.append('path')
+            .datum(tension1Data)
+            .attr('class', 'line-tension1')
+            .attr('fill', 'none')
+            .attr('stroke', pairData.metadata?.tension1_color || '#00D9FF')  // Cyan blue
+            .attr('stroke-width', 2)
+            .attr('stroke-linejoin', 'round')
+            .attr('stroke-linecap', 'round')
+            .attr('d', lineGenerator);
+    }
+
+    // Render Tension₂ line (red, thicker)
+    if (tension2Data.length > 0) {
+        chart.linesGroup.append('path')
+            .datum(tension2Data)
+            .attr('class', 'line-tension2')
+            .attr('fill', 'none')
+            .attr('stroke', pairData.metadata?.tension2_color || '#FF375F')  // Red
+            .attr('stroke-width', 2.5)
+            .attr('stroke-linejoin', 'round')
+            .attr('stroke-linecap', 'round')
+            .attr('d', lineGenerator);
+    }
+
+    // Render legend
+    const legendData = [
+        {
+            label: `Tension₁: ${pairData.sentiment_label} - ${pairData.mechanics_label}`,
+            color: pairData.metadata?.tension1_color || '#00D9FF'
+        },
+        {
+            label: `Tension₂: Abnormality Score`,
+            color: pairData.metadata?.tension2_color || '#FF375F'
+        }
+    ];
+
+    const legendHeight = 25;
+    const legendItemHeight = 20;
+
+    legendData.forEach((item, i) => {
+        const legendItem = chart.legendGroup.append('g')
+            .attr('transform', `translate(0, ${i * legendItemHeight})`);
+
+        // Color indicator
+        legendItem.append('rect')
+            .attr('width', 12)
+            .attr('height', 12)
+            .attr('fill', item.color)
+            .attr('rx', 2);
+
+        // Label
+        legendItem.append('text')
+            .attr('x', 18)
+            .attr('y', 10)
+            .style('fill', '#ccc')
+            .style('font-size', '12px')
+            .style('font-family', 'monospace')
+            .text(item.label);
+    });
+
+    // Setup zoom behavior
+    setupTensionChartZoom(chart, chartKey);
+}
+
+/**
+ * Setup zoom behavior for tension charts
+ * @param {Object} chart - Chart instance
+ * @param {string} chartKey - Chart identifier
+ */
+function setupTensionChartZoom(chart, chartKey) {
+    const zoom = d3.zoom()
+        .scaleExtent([1, 50])
+        .translateExtent([[0, 0], [chart.width, chart.height]])
+        .extent([[0, 0], [chart.width, chart.height]])
+        .on('zoom', (event) => {
+            const transform = event.transform;
+            chart.currentTransform = transform;
+
+            // Update x-scale with transform
+            const newXScale = transform.rescaleX(chart.xScale);
+
+            // Update x-axis
+            chart.xAxisGroup.call(chart.xAxis.scale(newXScale));
+
+            // Update lines
+            chart.linesGroup.selectAll('path.line-tension1, path.line-tension2')
+                .attr('d', d3.line()
+                    .x(d => newXScale(new Date(d[0])))
+                    .y(d => chart.yScale(d[1]))
+                    .defined(d => d[1] !== null && !isNaN(d[1]))
+                    .curve(d3.curveMonotoneX)
+                );
+
+            // Update zero line
+            chart.zeroLine
+                .attr('x1', 0)
+                .attr('x2', chart.width);
+        });
+
+    chart.overlay.call(zoom);
+    chart.zoom = zoom;
 }
 
