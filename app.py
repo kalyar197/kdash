@@ -179,16 +179,11 @@ NORMALIZERS = {
 }
 
 # System 2: Velocity-Anchored Oscillators Configuration
-# 22 datasets across 6 categories for momentum divergence detection
+# 19 datasets across 5 categories for momentum divergence detection
 SYSTEM2_DATASETS = {
-    # Derivatives (3)
+    # Derivatives (2)
     'funding': {'key': 'funding_rate_btc', 'label': 'Funding Rate', 'category': 'Derivatives'},
-    'basis': {'key': 'basis_spread_btc', 'label': 'Basis Spread', 'category': 'Derivatives'},
     'dvol': {'key': 'dvol_btc', 'label': 'DVOL Index', 'category': 'Derivatives'},
-
-    # Volume & Participation (2)
-    'volume_btc': {'key': 'volume_btc', 'label': 'BTC Volume', 'category': 'Volume'},
-    'volume_eth': {'key': 'volume_eth', 'label': 'ETH Volume', 'category': 'Volume'},
 
     # Whale Activity (2)
     'largetx': {'key': 'btc_largetxcount', 'label': 'Large Transaction Count', 'category': 'Whale'},

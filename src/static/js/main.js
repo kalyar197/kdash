@@ -14,7 +14,8 @@ import {
 const appState = {
     activeTab: 'main',         // Current active tab
     days: {
-        btc: 180                    // Default 6M for BTC
+        main: { btc: 180 },         // Main tab: Default 6M for BTC
+        system2: { btc: 180 }       // System 2 tab: Default 6M for BTC
     },
     chartData: {
         btc: null
@@ -53,9 +54,10 @@ const appState = {
         adx: '#673AB7',           // Purple
         atr: '#FF5722'            // Orange-red
     },
-    // Noise level state (unified for all oscillators)
+    // Noise level state (tab-specific for independent control)
     noiseLevel: {
-        btc: 14                     // Default: Max noise level
+        main: { btc: 50 },          // Main tab: Default noise level
+        system2: { btc: 30 }        // System 2 tab: Default noise level
     },
     compositeMode: true,  // Use composite oscillator mode by default
     // Overlay state (moving averages on price chart)
@@ -182,6 +184,7 @@ function setupTimeControls() {
         button.addEventListener('click', async () => {
             const dataset = button.dataset.dataset;
             const days = parseInt(button.dataset.days);
+            const tab = appState.activeTab; // Determine which tab is currently active
 
             // Update active button for this dataset
             document.querySelectorAll(`.time-btn[data-dataset="${dataset}"]`).forEach(btn => {
@@ -189,11 +192,14 @@ function setupTimeControls() {
             });
             button.classList.add('active');
 
-            // Update state and reload chart
-            appState.days[dataset] = days;
+            // Update tab-specific state
+            appState.days[tab][dataset] = days;
 
-            // Check which tab is active and reload appropriate data
-            if (appState.activeTab === 'system2') {
+            // Clear globalDateExtent to force recalculation with new time period
+            appState.globalDateExtent = null;
+
+            // Reload appropriate tab data
+            if (tab === 'system2') {
                 await loadSystem2Tab(dataset);
             } else {
                 // Main tab - reload all charts
@@ -247,6 +253,7 @@ function setupNoiseLevelControls() {
         button.addEventListener('click', async () => {
             const asset = button.dataset.asset;
             const level = parseInt(button.dataset.level);
+            const tab = appState.activeTab; // Determine which tab is currently active
 
             // Update active button state for this asset
             document.querySelectorAll(`.noise-btn:not(.volatility-noise-btn)[data-asset="${asset}"]`).forEach(btn => {
@@ -254,13 +261,13 @@ function setupNoiseLevelControls() {
             });
             button.classList.add('active');
 
-            // Update state
-            appState.noiseLevel[asset] = level;
+            // Update tab-specific state
+            appState.noiseLevel[tab][asset] = level;
 
-            console.log(`Noise level changed for ${asset}: ${level}`);
+            console.log(`Noise level changed for ${asset} in ${tab} tab: ${level}`);
 
-            // Check which tab is active and reload appropriate data
-            if (appState.activeTab === 'system2') {
+            // Reload appropriate tab data
+            if (tab === 'system2') {
                 await loadSystem2Tab(asset);
             } else {
                 // Main tab - reload all oscillator charts with new noise level
@@ -360,10 +367,9 @@ async function loadTab(dataset) {
 async function loadSystem2Tab(asset) {
     console.log(`Loading System 2 tab for ${asset}`);
 
-    // Define all 22 System 2 datasets organized by category
+    // Define all 19 System 2 datasets organized by category
     const system2Datasets = {
-        'Derivatives': ['funding', 'basis', 'dvol'],
-        'Volume': ['volume_btc', 'volume_eth'],
+        'Derivatives': ['funding', 'dvol'],
         'Whale': ['largetx', 'avgtx'],
         'Social': ['social_dominance', 'posts', 'contributors_active', 'contributors_new'],
         'On-Chain': ['sending_addr', 'receiving_addr', 'new_addr', 'txcount', 'tether_flow', 'mean_fees'],
@@ -373,7 +379,7 @@ async function loadSystem2Tab(asset) {
     // Flatten to get all dataset keys
     const allDatasets = Object.values(system2Datasets).flat();
 
-    // Initialize all 22 charts if not already initialized
+    // Initialize all 19 charts if not already initialized
     if (!appState.system2Initialized) {
         console.log('Initializing System 2 charts...');
 
@@ -391,8 +397,11 @@ async function loadSystem2Tab(asset) {
     // Fetch System 2 data
     console.log('Fetching System 2 data...');
     try {
-        const days = appState.days[asset] || 30; // Use state or default to 30 days
-        const noiseLevel = appState.noiseLevel[asset] || 30;
+        // Use System 2 tab-specific state
+        const days = appState.days.system2[asset] || 180;
+        const noiseLevel = appState.noiseLevel.system2[asset] || 30;
+
+        console.log(`[System 2] Loading data: ${days} days, noise level ${noiseLevel}`);
 
         const result = await getSystem2Data(asset, days, noiseLevel);
 
@@ -404,6 +413,29 @@ async function loadSystem2Tab(asset) {
 
         // Store data in state
         appState.system2Data[asset] = result;
+
+        // Update global date extent based on System 2 data timestamps
+        // Extract all timestamps from the breakdown data to calculate the date range
+        const allTimestamps = [];
+        for (const oscillatorData of Object.values(result.breakdown)) {
+            if (oscillatorData.data && oscillatorData.data.length > 0) {
+                oscillatorData.data.forEach(point => {
+                    // System 2 data is in array format: [timestamp, value]
+                    if (point && point[0]) {
+                        allTimestamps.push(new Date(point[0]));
+                    }
+                });
+            }
+        }
+
+        // Always recalculate globalDateExtent from fresh System 2 data
+        if (allTimestamps.length > 0) {
+            appState.globalDateExtent = d3.extent(allTimestamps);
+            console.log(`[System 2] Updated globalDateExtent: ${appState.globalDateExtent[0]} to ${appState.globalDateExtent[1]}`);
+        } else {
+            appState.globalDateExtent = null;
+            console.warn(`[System 2] No timestamps found, globalDateExtent set to null`);
+        }
 
         // Render each oscillator chart
         for (const [key, oscillatorData] of Object.entries(result.breakdown)) {
@@ -452,9 +484,10 @@ async function loadSystem3Tab(asset) {
  * @param {string} dataset - Dataset name ('btc', 'eth', or 'gold')
  */
 async function loadChartData(dataset) {
-    const days = appState.days[dataset];
+    // Use Main tab-specific state
+    const days = appState.days.main[dataset];
 
-    console.log(`Fetching ${dataset} data for ${days} days...`);
+    console.log(`[Main] Fetching ${dataset} data for ${days} days...`);
 
     // Show loading state
     showLoadingMessage(dataset);
@@ -520,10 +553,11 @@ async function loadChartData(dataset) {
  * @param {string} asset - Asset name ('btc', 'eth', 'gold')
  */
 async function loadOscillatorData(asset) {
-    const days = appState.days[asset];
+    // Use Main tab-specific state
+    const days = appState.days.main[asset];
     const datasets = appState.selectedDatasets[asset].join(',');
     const mode = appState.compositeMode ? 'composite' : 'individual';
-    const noiseLevel = appState.noiseLevel[asset];
+    const noiseLevel = appState.noiseLevel.main[asset];
     const normalizer = 'zscore';  // Always use zscore (regression divergence) normalizer
 
     if (!datasets) {
@@ -624,10 +658,11 @@ async function loadOscillatorData(asset) {
  * Load breakdown oscillator data (Momentum: RSI, MACD, ADX, ATR)
  */
 async function loadBreakdownOscillatorData(asset) {
-    const days = appState.days[asset];
+    // Use Main tab-specific state
+    const days = appState.days.main[asset];
     const datasets = 'rsi,adx';  // Only RSI + ADX
     const mode = 'composite';  // Use composite mode for normalization
-    const noiseLevel = appState.noiseLevel[asset];  // Unified noise level
+    const noiseLevel = appState.noiseLevel.main[asset];
     const normalizer = 'zscore';
 
     console.log(`Fetching breakdown oscillator data for ${asset}: datasets=${datasets}, noise_level=${noiseLevel}, days=${days}`);
@@ -671,10 +706,11 @@ async function loadBreakdownOscillatorData(asset) {
  * @param {string} asset - Asset name (e.g., 'btc')
  */
 async function loadBreakdownPriceOscillatorData(asset) {
-    const days = appState.days[asset];
+    // Use Main tab-specific state
+    const days = appState.days.main[asset];
     const datasets = 'dxy_price_yfinance,gold_price_oscillator,spx_price_fmp';  // Price oscillators (market hours only)
     const mode = 'composite';  // Use composite mode for normalization
-    const noiseLevel = appState.noiseLevel[asset];  // Unified noise level
+    const noiseLevel = appState.noiseLevel.main[asset];
     const normalizer = 'zscore';
 
     console.log(`Fetching breakdown price oscillator data for ${asset}: datasets=${datasets}, noise_level=${noiseLevel}, days=${days}`);
@@ -718,10 +754,11 @@ async function loadBreakdownPriceOscillatorData(asset) {
  * @param {string} asset - Asset name (e.g., 'btc')
  */
 async function loadMacroOscillatorData(asset) {
-    const days = appState.days[asset];
+    // Use Main tab-specific state
+    const days = appState.days.main[asset];
     const datasets = 'eth_price_alpaca,btc_dominance_cmc,usdt_dominance_cmc';  // Macro oscillators (24/7 crypto)
     const mode = 'composite';  // Use composite mode for normalization
-    const noiseLevel = appState.noiseLevel[asset];  // Unified noise level
+    const noiseLevel = appState.noiseLevel.main[asset];
     const normalizer = 'zscore';
 
     console.log(`Fetching breakdown macro oscillator data for ${asset}: datasets=${datasets}, noise_level=${noiseLevel}, days=${days}`);
@@ -765,10 +802,11 @@ async function loadMacroOscillatorData(asset) {
  * @param {string} asset - Asset name (e.g., 'btc')
  */
 async function loadBreakdownDerivativesOscillatorData(asset) {
-    const days = appState.days[asset];
+    // Use Main tab-specific state
+    const days = appState.days.main[asset];
     const datasets = 'dvol_index_deribit,basis_spread_binance';  // Derivatives oscillators
     const mode = 'composite';  // Use composite mode for normalization
-    const noiseLevel = appState.noiseLevel[asset];  // Unified noise level
+    const noiseLevel = appState.noiseLevel.main[asset];
     const normalizer = 'zscore';
 
     console.log(`Fetching breakdown derivatives oscillator data for ${asset}: datasets=${datasets}, noise_level=${noiseLevel}, days=${days}`);
@@ -862,9 +900,10 @@ function clearMessages(dataset) {
  * @param {string} asset - Asset name ('btc', 'eth', etc.)
  */
 async function loadFundingRateData(asset) {
-    const days = appState.days[asset];
+    // Use Main tab-specific state
+    const days = appState.days.main[asset];
 
-    console.log(`Fetching funding rate data for ${asset}: ${days} days`);
+    console.log(`[Main] Fetching funding rate data for ${asset}: ${days} days`);
 
     try {
         // Fetch funding rate data from API

@@ -860,6 +860,12 @@ export function renderBreakdownChart(asset, breakdownData, forcedDomain = null) 
     // Update X scale domain
     // Use forced domain if provided, otherwise calculate from data
     const xExtent = forcedDomain || d3.extent(allTimestamps).map(ts => new Date(ts));
+
+    // Add warning if falling back to data extent (indicates synchronization issue)
+    if (!forcedDomain && allTimestamps.length > 0) {
+        console.warn(`[Breakdown] No forced domain provided for ${asset}, using data extent:`, xExtent);
+    }
+
     chart.xScale.domain(xExtent);
 
     // Update Y scale domain (use same logic as composite - symmetrical around 0, minimum ±3.5)
