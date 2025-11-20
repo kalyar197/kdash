@@ -761,108 +761,56 @@ export function renderFundingRateChart(dataset, data, forcedDomain = null) {
     chart.lineGroup.selectAll('*').remove();
     chart.axisGroup.selectAll('*').remove();
 
-    // Define color thresholds
-    const positiveThreshold = 0.01;  // 0.01%
-    const negativeThreshold = -0.01; // -0.01%
+    // Render reference line at 0%
+    const zeroY = chart.yScale(0);
+    chart.referenceGroup.append('line')
+        .attr('x1', 0)
+        .attr('x2', chart.width)
+        .attr('y1', zeroY)
+        .attr('y2', zeroY)
+        .attr('stroke', '#555')
+        .attr('stroke-width', 1)
+        .attr('stroke-opacity', 0.4)
+        .attr('stroke-dasharray', '3,3');
 
-    // Color function based on value
-    const getColor = (value) => {
-        if (value > positiveThreshold) return '#26a69a';  // Green (bullish)
-        if (value < negativeThreshold) return '#ef5350';  // Red (bearish)
-        return '#888888';  // Gray (neutral)
-    };
+    // Label for 0% line
+    chart.referenceGroup.append('text')
+        .attr('x', chart.width + 5)
+        .attr('y', zeroY)
+        .attr('dy', '0.32em')
+        .attr('fill', '#888')
+        .attr('font-size', '10px')
+        .text('0%');
 
-    // Render reference lines
-    const referenceLines = [
-        { value: positiveThreshold, label: '+0.01%', color: '#26a69a' },
-        { value: 0, label: '0%', color: '#888' },
-        { value: negativeThreshold, label: '-0.01%', color: '#ef5350' }
-    ];
-
-    referenceLines.forEach(line => {
-        const y = chart.yScale(line.value);
-
-        // Horizontal line
-        chart.referenceGroup.append('line')
-            .attr('x1', 0)
-            .attr('x2', chart.width)
-            .attr('y1', y)
-            .attr('y2', y)
-            .attr('stroke', line.color)
-            .attr('stroke-width', line.value === 0 ? 2 : 1)
-            .attr('stroke-opacity', line.value === 0 ? 0.5 : 0.3)
-            .attr('stroke-dasharray', line.value === 0 ? '0' : '3,3');
-
-        // Label (right side)
-        chart.referenceGroup.append('text')
-            .attr('x', chart.width + 5)
-            .attr('y', y)
-            .attr('dy', '0.32em')
-            .attr('fill', line.color)
-            .attr('font-size', '10px')
-            .text(line.label);
-    });
-
-    // Render area fill (color segments)
-    // Group data into segments by color
-    const segments = [];
-    let currentSegment = null;
-
-    data.forEach((d, i) => {
-        const color = getColor(d[1]);
-
-        if (!currentSegment || currentSegment.color !== color) {
-            // Start new segment
-            if (currentSegment) {
-                // Add transition point to previous segment
-                currentSegment.data.push(d);
-                segments.push(currentSegment);
-            }
-            currentSegment = { color, data: [d] };
-        } else {
-            // Continue current segment
-            currentSegment.data.push(d);
-        }
-    });
-
-    // Push final segment
-    if (currentSegment) {
-        segments.push(currentSegment);
-    }
-
-    // Area generator
+    // Area generator (single continuous area)
     const area = d3.area()
         .x(d => chart.xScale(new Date(d[0])))
         .y0(chart.yScale(0))
         .y1(d => chart.yScale(d[1]))
         .curve(d3.curveLinear);
 
-    // Render area segments
-    segments.forEach((segment, i) => {
-        chart.areaGroup.append('path')
-            .datum(segment.data)
-            .attr('class', `area-segment-${i}`)
-            .attr('fill', segment.color)
-            .attr('fill-opacity', 0.2)
-            .attr('d', area);
-    });
+    // Render single continuous area
+    chart.areaGroup.append('path')
+        .datum(data)
+        .attr('class', 'funding-rate-area')
+        .attr('fill', '#4A90E2')
+        .attr('fill-opacity', 0.15)
+        .attr('d', area);
 
-    // Line generator
+    // Line generator (single continuous line)
     const line = d3.line()
         .x(d => chart.xScale(new Date(d[0])))
         .y(d => chart.yScale(d[1]))
         .curve(d3.curveLinear);
 
-    // Render line segments (colored)
-    segments.forEach((segment, i) => {
-        chart.lineGroup.append('path')
-            .datum(segment.data)
-            .attr('class', `line-segment-${i}`)
-            .attr('fill', 'none')
-            .attr('stroke', segment.color)
-            .attr('stroke-width', 2)
-            .attr('d', line);
-    });
+    // Render single continuous line
+    chart.lineGroup.append('path')
+        .datum(data)
+        .attr('class', 'funding-rate-line')
+        .attr('fill', 'none')
+        .attr('stroke', '#4A90E2')
+        .attr('stroke-width', 2)
+        .attr('d', line);
 
     // X-axis
     const xAxis = d3.axisBottom(chart.xScale)

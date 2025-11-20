@@ -24,7 +24,7 @@ from src.data import (
     dxy_price_yfinance, btc_dominance_cmc, usdt_dominance_cmc,
     dvol_index_deribit, basis_spread_binance, markov_regime
 )
-from src.data.normalizers import zscore, pct_change_zscore
+from src.data.normalizers import zscore, pct_change_zscore, tension_analyzer
 from src.data.postgres_provider import get_data as postgres_get_data, get_metadata as postgres_get_metadata
 
 # Application imports - Management
@@ -209,6 +209,174 @@ SYSTEM2_DATASETS = {
     'supply_addr_bal': {'key': 'btc_splyadrbal1', 'label': 'Supply Address Balance', 'category': 'Supply'},
     'addr_supply_10k': {'key': 'btc_addressessupply1in10k', 'label': 'Addresses Supply 1/10k', 'category': 'Supply'},
     'ser': {'key': 'btc_ser', 'label': 'Supply Equilibrium Ratio', 'category': 'Supply'}
+}
+
+# System 3: Tension² Pairs Oscillator Configuration
+# 20 pairs across 6 categories for two-level divergence analysis
+# Each pair: Sentiment component vs Mechanics component
+SYSTEM3_PAIRS = {
+    'A': [  # Volatility (3 pairs)
+        {
+            'name': 'DVOL vs ATR',
+            'sentiment': 'dvol_btc',
+            'mechanics': 'atr_btc',
+            'sentiment_label': 'DVOL Index',
+            'mechanics_label': 'ATR'
+        },
+        {
+            'name': 'Basis Spread vs ATR',
+            'sentiment': 'basis_spread_btc',
+            'mechanics': 'atr_btc',
+            'sentiment_label': 'Basis Spread',
+            'mechanics_label': 'ATR'
+        },
+        {
+            'name': 'Funding Rate vs ATR',
+            'sentiment': 'funding_rate_btc',
+            'mechanics': 'atr_btc',
+            'sentiment_label': 'Funding Rate',
+            'mechanics_label': 'ATR'
+        }
+    ],
+    'B': [  # Sentiment vs Participation (4 pairs)
+        {
+            'name': 'Funding Rate vs Volume',
+            'sentiment': 'funding_rate_btc',
+            'mechanics': 'volume_btc',
+            'sentiment_label': 'Funding Rate',
+            'mechanics_label': 'Volume'
+        },
+        {
+            'name': 'Basis Spread vs Volume',
+            'sentiment': 'basis_spread_btc',
+            'mechanics': 'volume_btc',
+            'sentiment_label': 'Basis Spread',
+            'mechanics_label': 'Volume'
+        },
+        {
+            'name': 'Social Dominance vs Volume',
+            'sentiment': 'btc_socialdominance',
+            'mechanics': 'volume_btc',
+            'sentiment_label': 'Social Dominance',
+            'mechanics_label': 'Volume'
+        },
+        {
+            'name': 'Posts Created vs Transaction Count',
+            'sentiment': 'btc_postscreated',
+            'mechanics': 'btc_txcount',
+            'sentiment_label': 'Posts Created',
+            'mechanics_label': 'Transaction Count'
+        }
+    ],
+    'C': [  # Whale vs Retail (5 pairs)
+        {
+            'name': 'Basis Spread vs Large Transactions',
+            'sentiment': 'basis_spread_btc',
+            'mechanics': 'btc_largetxcount',
+            'sentiment_label': 'Basis Spread',
+            'mechanics_label': 'Large Tx Count'
+        },
+        {
+            'name': 'Funding Rate vs Large Transactions',
+            'sentiment': 'funding_rate_btc',
+            'mechanics': 'btc_largetxcount',
+            'sentiment_label': 'Funding Rate',
+            'mechanics_label': 'Large Tx Count'
+        },
+        {
+            'name': 'Social Dominance vs Large Transactions',
+            'sentiment': 'btc_socialdominance',
+            'mechanics': 'btc_largetxcount',
+            'sentiment_label': 'Social Dominance',
+            'mechanics_label': 'Large Tx Count'
+        },
+        {
+            'name': 'New Addresses vs Address Supply 1/10k',
+            'sentiment': 'btc_newaddresses',
+            'mechanics': 'btc_addressessupply1in10k',
+            'sentiment_label': 'New Addresses',
+            'mechanics_label': 'Whale Addresses'
+        },
+        {
+            'name': 'Volume vs Large Transactions',
+            'sentiment': 'volume_btc',
+            'mechanics': 'btc_largetxcount',
+            'sentiment_label': 'Volume',
+            'mechanics_label': 'Large Tx Count'
+        }
+    ],
+    'D': [  # Supply Dynamics (3 pairs)
+        {
+            'name': 'New Addresses vs Active Supply 1Y',
+            'sentiment': 'btc_newaddresses',
+            'mechanics': 'btc_activesupply1y',
+            'sentiment_label': 'New Addresses',
+            'mechanics_label': 'Active Supply 1Y'
+        },
+        {
+            'name': 'Sending vs Receiving Addresses',
+            'sentiment': 'btc_sendingaddresses',
+            'mechanics': 'btc_receivingaddresses',
+            'sentiment_label': 'Sending Addresses',
+            'mechanics_label': 'Receiving Addresses'
+        },
+        {
+            'name': 'Active 1Y vs Supply Address Balance',
+            'sentiment': 'btc_active1y',
+            'mechanics': 'btc_splyadrbal1',
+            'sentiment_label': 'Active 1Y',
+            'mechanics_label': 'Supply Addr Balance'
+        }
+    ],
+    'E': [  # Macro vs Crypto (3 pairs - skipping Pair 19: RRP vs Volume)
+        {
+            'name': 'SPX Momentum vs BTC Momentum',
+            'sentiment': 'spx_price',
+            'mechanics': 'btc_price',
+            'sentiment_label': 'SPX Momentum',
+            'mechanics_label': 'BTC Momentum'
+        },
+        {
+            'name': 'DXY Momentum vs BTC Dominance',
+            'sentiment': 'dxy_price',
+            'mechanics': 'btc_dominance',
+            'sentiment_label': 'DXY Momentum',
+            'mechanics_label': 'BTC Dominance'
+        },
+        {
+            'name': 'Gold Momentum vs BTC Momentum',
+            'sentiment': 'gold_price',
+            'mechanics': 'btc_price',
+            'sentiment_label': 'Gold Momentum',
+            'mechanics_label': 'BTC Momentum'
+        }
+    ],
+    'F': [  # DeFi vs CeFi (2 pairs)
+        {
+            'name': 'BTC Staking TVL vs Basis Spread',
+            'sentiment': 'btcst_tvl',
+            'mechanics': 'basis_spread_btc',
+            'sentiment_label': 'BTC Staking TVL',
+            'mechanics_label': 'Basis Spread'
+        },
+        {
+            'name': 'Transaction Count vs Volume',
+            'sentiment': 'btc_txcount',
+            'mechanics': 'volume_btc',
+            'sentiment_label': 'Transaction Count',
+            'mechanics_label': 'Volume'
+        }
+    ]
+}
+
+# Category labels for System 3
+SYSTEM3_CATEGORY_LABELS = {
+    'A': 'Volatility',
+    'B': 'Sentiment vs Participation',
+    'C': 'Whale vs Retail',
+    'D': 'Supply Dynamics',
+    'E': 'Macro vs Crypto',
+    'F': 'DeFi vs CeFi'
 }
 
 def align_timestamps(normalized_oscillators):
@@ -1045,6 +1213,219 @@ def get_system2_data():
         import traceback
         traceback.print_exc()
         return jsonify({'error': f'Server error processing System 2 data: {str(e)}'}), 500
+
+
+@app.route('/api/system3-data')
+def get_system3_data():
+    """
+    System 3: Tension² Pairs Oscillator
+
+    Calculate two-level tension analysis for sentiment vs mechanics pairs:
+    - Tension₁ (Raw Divergence): Sentiment_z - Mechanics_z
+    - Tension₂ (Abnormality Score): z-score(Tension₁)
+
+    Query parameters:
+    - category: Category A-F (default: 'A')
+    - asset: Asset symbol (default: 'btc', only BTC currently supported)
+    - days: Number of days to fetch (default: 365)
+    - window: Rolling window size for z-score calculations (default: 30)
+
+    Returns:
+        {
+            'category': 'A',
+            'category_label': 'Volatility',
+            'pairs': [
+                {
+                    'name': 'DVOL vs ATR',
+                    'sentiment_name': 'dvol_btc',
+                    'mechanics_name': 'atr_btc',
+                    'sentiment_label': 'DVOL Index',
+                    'mechanics_label': 'ATR',
+                    'tension1': [[timestamp, value], ...],
+                    'tension2': [[timestamp, value], ...],
+                    'metadata': {...}
+                },
+                ...
+            ],
+            'common_timestamps': [...],
+            'metadata': {...}
+        }
+    """
+    try:
+        # Parse query parameters
+        category = request.args.get('category', 'A').upper()
+        asset = request.args.get('asset', 'btc').lower()
+        days = int(request.args.get('days', '365'))
+        window = int(request.args.get('window', '30'))
+
+        # Validate category
+        if category not in SYSTEM3_PAIRS:
+            return jsonify({
+                'error': f'Invalid category: {category}. Valid categories: A, B, C, D, E, F'
+            }), 400
+
+        # Only BTC currently supported
+        if asset != 'btc':
+            return jsonify({'error': f'Asset {asset} not supported. Only BTC available.'}), 400
+
+        # Check cache
+        cache_key = f"system3_{category}_{asset}_{days}_{window}"
+        if cache_key in cache:
+            cached_entry = cache[cache_key]
+            if time.time() - cached_entry['timestamp'] < CACHE_DURATION:
+                print(f"[System 3] Returning cached data for category {category}")
+                return jsonify(cached_entry['data'])
+
+        print(f"[System 3] Fetching data for category {category}, {days} days, window {window}")
+
+        # Calculate price days (need extra for rolling window)
+        price_days = days + window + 10  # Add buffer for window + alignment
+
+        # Step 1: Fetch BTC price data (for normalization)
+        btc_ohlcv_data = postgres_get_data('btc_price', price_days)
+
+        if not btc_ohlcv_data:
+            return jsonify({'error': 'Failed to fetch BTC price data'}), 500
+
+        print(f"[System 3] Fetched {len(btc_ohlcv_data)} BTC price points")
+
+        # Step 2: Process each pair in the category
+        pairs = SYSTEM3_PAIRS.get(category, [])
+        results = []
+        failed_pairs = []
+        all_timestamps = []
+
+        for pair_config in pairs:
+            pair_name = pair_config['name']
+            sentiment_key = pair_config['sentiment']
+            mechanics_key = pair_config['mechanics']
+
+            try:
+                # Apply rate limiting
+                rate_limit_check(f"system3_{sentiment_key}")
+                rate_limit_check(f"system3_{mechanics_key}")
+
+                # Map to database source names
+                sentiment_source = DATASET_NAME_MAPPING.get(sentiment_key, sentiment_key)
+                mechanics_source = DATASET_NAME_MAPPING.get(mechanics_key, mechanics_key)
+
+                # Fetch sentiment data
+                print(f"[System 3] Fetching sentiment: {sentiment_source}")
+                sentiment_data = postgres_get_data(sentiment_source, price_days)
+
+                if not sentiment_data:
+                    error_msg = f"No data found for sentiment: {sentiment_source}"
+                    print(f"[System 3] {error_msg}")
+                    failed_pairs.append({
+                        'pair': pair_name,
+                        'error': error_msg
+                    })
+                    continue
+
+                # Fetch mechanics data
+                print(f"[System 3] Fetching mechanics: {mechanics_source}")
+                mechanics_data = postgres_get_data(mechanics_source, price_days)
+
+                if not mechanics_data:
+                    error_msg = f"No data found for mechanics: {mechanics_source}"
+                    print(f"[System 3] {error_msg}")
+                    failed_pairs.append({
+                        'pair': pair_name,
+                        'error': error_msg
+                    })
+                    continue
+
+                print(f"[System 3] Processing pair: {pair_name}")
+                print(f"  - Sentiment: {len(sentiment_data)} points")
+                print(f"  - Mechanics: {len(mechanics_data)} points")
+
+                # Calculate tensions using tension_analyzer
+                tensions = tension_analyzer.calculate_tensions(
+                    sentiment_data=sentiment_data,
+                    mechanics_data=mechanics_data,
+                    btc_price_data=btc_ohlcv_data,
+                    window=window
+                )
+
+                tension1_data = tensions['tension1']
+                tension2_data = tensions['tension2']
+
+                # Trim to requested number of days
+                if tension2_data and days:
+                    cutoff_timestamp = tension2_data[-1][0] - (days * 24 * 60 * 60 * 1000)
+                    tension1_data = [d for d in tension1_data if d[0] >= cutoff_timestamp]
+                    tension2_data = [d for d in tension2_data if d[0] >= cutoff_timestamp]
+
+                print(f"[System 3] {pair_name}: Tension₁={len(tension1_data)} points, Tension₂={len(tension2_data)} points")
+
+                # Collect timestamps
+                all_timestamps.extend([d[0] for d in tension2_data])
+
+                # Store result
+                results.append({
+                    'name': pair_name,
+                    'sentiment_name': sentiment_key,
+                    'mechanics_name': mechanics_key,
+                    'sentiment_label': pair_config['sentiment_label'],
+                    'mechanics_label': pair_config['mechanics_label'],
+                    'tension1': tension1_data,
+                    'tension2': tension2_data,
+                    'metadata': {
+                        'window': window,
+                        'tension1_color': '#00D9FF',  # Blue for Tension₁
+                        'tension2_color': '#FF375F'   # Red for Tension₂
+                    }
+                })
+
+            except Exception as e:
+                error_msg = str(e)
+                print(f"[System 3] Error processing pair {pair_name}: {error_msg}")
+                import traceback
+                traceback.print_exc()
+                failed_pairs.append({
+                    'pair': pair_name,
+                    'error': error_msg
+                })
+
+        # Step 3: Find common timestamps
+        common_timestamps = sorted(set(all_timestamps))
+        print(f"[System 3] Found {len(common_timestamps)} common timestamps")
+
+        # Step 4: Build response
+        result = {
+            'category': category,
+            'category_label': SYSTEM3_CATEGORY_LABELS.get(category, category),
+            'asset': asset,
+            'pairs': results,
+            'common_timestamps': common_timestamps,
+            'errors': failed_pairs,
+            'metadata': {
+                'system': 'System 3: Tension² Pairs Oscillator',
+                'normalizer': 'tension_analyzer (two-level z-score divergence)',
+                'total_pairs': len(pairs),
+                'successful': len(results),
+                'failed': len(failed_pairs),
+                'days': days,
+                'window': window,
+                'description': 'Raw divergence (Tension₁) and abnormality score (Tension₂)'
+            }
+        }
+
+        print(f"[System 3] Successfully processed {len(results)}/{len(pairs)} pairs")
+
+        # Store in cache
+        cache[cache_key] = {
+            'data': result,
+            'timestamp': time.time()
+        }
+
+        return jsonify(result)
+
+    except Exception as e:
+        print(f"Error processing System 3 data: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Server error processing System 3 data: {str(e)}'}), 500
 
 
 @app.route('/api/clear-cache')

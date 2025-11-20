@@ -86,3 +86,36 @@ export async function getSystem2Data(asset = 'btc', days = 365, noiseLevel = 30)
         throw error;
     }
 }
+
+/**
+ * Fetch System 3 (Tension² Pairs) data for a specific category
+ * @param {string} category - Category A-F
+ * @param {string} asset - Asset symbol (e.g., 'btc')
+ * @param {number} days - Number of days to fetch
+ * @param {number} window - Rolling window size for z-score calculations
+ * @returns {Promise<Object>} System 3 data with pairs array
+ */
+export async function getSystem3Data(category, asset, days, window) {
+    try {
+        console.log(`[System 3] Fetching data: category=${category}, asset=${asset}, days=${days}, window=${window}`);
+        const url = `${API_BASE_URL}/api/system3-data?category=${category}&asset=${asset}&days=${days}&window=${window}`;
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        if (!data.pairs) {
+            console.warn('[System 3] Response missing pairs data');
+        }
+
+        console.log(`[System 3] Received ${data.pairs?.length || 0} pairs for category ${category}`);
+
+        return data;
+    } catch (error) {
+        console.error(`Error fetching System 3 data for category ${category}:`, error);
+        throw error;
+    }
+}
