@@ -7,7 +7,6 @@ from . import cache_manager
 from . import incremental_data_manager
 
 # Import data plugins
-from . import eth_price
 from . import btc_price
 from . import gold_price
 from . import spx_price
@@ -42,7 +41,6 @@ __all__ = [
     'time_transformer',
     'cache_manager',
     'incremental_data_manager',
-    'eth_price',
     'btc_price',
     'gold_price',
     'spx_price',

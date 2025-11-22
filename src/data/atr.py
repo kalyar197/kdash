@@ -188,8 +188,8 @@ def get_data(days='365', asset='btc', period=14):
             from . import btc_price
             price_module = btc_price
         elif asset == 'eth':
-            from . import eth_price
-            price_module = eth_price
+            from . import eth_price_alpaca
+            price_module = eth_price_alpaca
         elif asset == 'gold':
             from . import gold_price
             price_module = gold_price

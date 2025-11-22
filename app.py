@@ -107,7 +107,7 @@ DATA_PLUGINS.update(OSCILLATOR_PLUGINS)
 DATASET_NAME_MAPPING = {
     # Price datasets
     'btc': 'btc_price',
-    'eth': 'eth_price',
+    'eth': 'eth_price_alpaca',  # Use Alpaca ETH price dataset
     'sol': 'sol_price',
 
     # Price oscillators

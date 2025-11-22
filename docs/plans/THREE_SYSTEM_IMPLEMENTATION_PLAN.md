@@ -77,7 +77,7 @@ Implement three complementary oscillator visualization systems to replace weight
 
 ---
 
-### System 3: Tension² Pairs (21 pairs, 6 categories)
+### System 3: Tension² Pairs (20 pairs, 6 categories)
 
 **Purpose**: Contrarian opportunity detection via information asymmetry
 
@@ -112,11 +112,10 @@ Implement three complementary oscillator visualization systems to replace weight
 14. btc_sendingaddresses vs btc_receivingaddresses
 15. btc_active1y vs btc_splyadrbal1
 
-**Category E: Macro vs Crypto (4 pairs)**
+**Category E: Macro vs Crypto (3 pairs)**
 16. SPX momentum vs BTC momentum
 17. DXY momentum vs BTC.D
 18. Gold momentum vs BTC momentum
-19. RRPONTSYD vs volume_btc
 
 **Category F: DeFi vs CeFi (2 pairs)**
 20. BTCST_TVL vs Basis Spread
@@ -247,8 +246,7 @@ SYSTEM3_PAIRS = {
     'E': [
         ('spx_price', 'btc_price'),  # Both as momentum
         ('dxy_price', 'btc_dominance'),
-        ('gold_price', 'btc_price'),
-        ('rrpontsyd', 'volume_btc')  # JSON-only dataset
+        ('gold_price', 'btc_price')
     ],
     'F': [
         ('btcst_tvl', 'basis_spread_btc'),

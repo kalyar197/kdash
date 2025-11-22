@@ -96,10 +96,6 @@ SYMBOLS = {
         ('TOTAL3', 'total3'),
         ('STABLE.C.D', 'stable_c_d'),
     ],
-    # FRED (1 symbol)
-    'FRED': [
-        ('RRPONTSYD', 'rrpontsyd'),
-    ],
 }
 
 

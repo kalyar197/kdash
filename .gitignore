@@ -211,7 +211,6 @@ data_cache/
 
 # Large data files (pre-computed and source)
 historical_data/btc_1min/*.json
-historical_data/btc_price_1min_complete.json
 historical_data/options_pcr_cvd/*.json
 
 # Testing and Development
@@ -219,7 +218,6 @@ historical_data/options_pcr_cvd/*.json
 .serena/
 noise_*.json
 test_*.py
-NULhistorical_data/btc_price_1min_complete.backup.json
 
 # Production-specific exclusions (BTC Trading Dashboard)
 # Storage directory contains runtime data, logs, and cache

@@ -105,8 +105,8 @@ def get_data(days='365', asset='btc'):
         from . import btc_price
         price_data = btc_price.get_data(days=days)
     elif asset == 'eth':
-        from . import eth_price
-        price_data = eth_price.get_data(days=days)
+        from . import eth_price_alpaca
+        price_data = eth_price_alpaca.get_data(days=days)
     else:
         # Default to BTC
         from . import btc_price

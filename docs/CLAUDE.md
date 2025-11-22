@@ -387,7 +387,7 @@ Successfully integrated 27 new metrics from TradingView covering on-chain, socia
 
 **ETFs (2)**: NASDAQ:IBIT, AMEX:GBTC
 
-**Other (4)**: KRAKEN:USDTUSD.PM, DEFILLAMA:BTCST_TVL, FRED:RRPONTSYD
+**Other (3)**: KRAKEN:USDTUSD.PM, DEFILLAMA:BTCST_TVL
 
 #### Key Files
 - **Symbol mapping**: `scripts/tradingview_symbols_final.json`
@@ -652,9 +652,8 @@ python scripts/tradingview_daily_update.py --symbols 5 --days 3
 
 #### ✅ Phase 1.6 Complete (Migration Script):
 - ✅ Migration script: `scripts/migrate_json_to_postgres.py` (batch upsert, 5000 records/batch)
-- ✅ Skip logic: `btc_price_1min_complete` (3M records, keep in JSON), `rrpontsyd` (numeric overflow)
 - ✅ Compression **REMOVED** (per user request - overkill for our scale, was blocking schema changes)
-- ✅ **Migration Complete** - All complete only some scripts that still fetch json are creating new json files even after deletion like the files for taker ratio data and dominance data.
+- ✅ **Migration Complete** - All datasets now in PostgreSQL
 
 ---
 

@@ -105,8 +105,6 @@ def categorize_datasets():
             categories['market'].append(info)
         elif any(x in filename for x in ['ibit', 'gbtc']):
             categories['etf'].append(info)
-        elif any(x in filename for x in ['rrpontsyd']):
-            categories['macro'].append(info)
         elif any(x in filename for x in ['usdt', 'usdtusd']):
             categories['stablecoin'].append(info)
         else:

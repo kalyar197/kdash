@@ -207,7 +207,7 @@ def get_data(days='365', asset='btc', fast_period=12, slow_period=26, signal_per
         if asset == 'btc':
             from . import btc_price as asset_module
         elif asset == 'eth':
-            from . import eth_price as asset_module
+            from . import eth_price_alpaca as asset_module
         elif asset == 'gold':
             from . import gold_price as asset_module
         else:

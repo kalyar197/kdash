@@ -62,11 +62,7 @@ class HybridDataProvider:
         }
 
         # Datasets NOT in PostgreSQL (kept in JSON)
-        self.json_only_datasets = {
-            'btc_price_1min_complete',  # 3M records - too large
-            'rrpontsyd',                # Numeric overflow issue
-            'eth_price'                 # Only 7 records (incomplete)
-        }
+        self.json_only_datasets = set()  # All datasets now in PostgreSQL
 
     def get_data(self, dataset_name: str, days: str, json_plugin: Optional[Any] = None) -> Dict[str, Any]:
         """
